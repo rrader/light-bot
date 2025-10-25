@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.log
+power_status.txt
+last_status.txt
+.pytest_cache/
+.coverage
+htmlcov/
