@@ -124,9 +124,23 @@ def update_power_status():
         # Only send notification if status changed
         notification_sent = False
         if status_changed:
-            emoji = '🟢' if status == 'on' else '🔴'
-            kyiv_time = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
-            message = f"{emoji} <b>Power Status Changed</b>\n\nNew Status: <b>{status.upper()}</b>\nTime: {kyiv_time}"
+            kyiv_time = datetime.now(TIMEZONE).strftime('%d.%m.%Y %H:%M:%S')
+
+            if status == 'on':
+                # Power is back
+                message = (
+                    "⚡️ <b>Світло з'явилось!</b> ⚡️\n\n"
+                    "✅ Електропостачання відновлено\n"
+                    f"🕐 Час: {kyiv_time}\n\n"
+                    "🏠 Можна користуватись побутовими приладами"
+                )
+            else:
+                # Power is out
+                message = (
+                    "🔴 <b>Світло зникло</b> 🔴\n\n"
+                    "❌ Електропостачання відсутнє\n"
+                    f"🕐 Час: {kyiv_time}"
+                )
 
             # Use event loop to send message
             loop = get_or_create_eventloop()
