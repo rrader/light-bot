@@ -1,8 +1,10 @@
 #!/bin/bash
 
+source .env
+
 # Configuration
-TARGET_IP="192.168.1.166"
-API_URL="http://localhost:5000/power-status"
+TARGET_IP="192.168.1.10"
+API_URL="https://light.rmn.pp.ua/power-status"
 API_TOKEN="${API_TOKEN:-your_api_token_here}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"  # seconds between checks
 PING_TIMEOUT="${PING_TIMEOUT:-2}"      # ping timeout in seconds
@@ -63,41 +65,29 @@ main() {
     # Initialize counters
     consecutive_up=0
     consecutive_down=0
-    last_sent_status=""
 
     while true; do
         if check_host; then
             consecutive_up=$((consecutive_up + 1))
             consecutive_down=0
-            current_check="up"
             status_text="${GREEN}UP${NC}"
         else
             consecutive_down=$((consecutive_down + 1))
             consecutive_up=0
-            current_check="down"
             status_text="${RED}DOWN${NC}"
         fi
 
         log "Host $TARGET_IP is $status_text (up: $consecutive_up, down: $consecutive_down)"
 
-        # Check if we should send status update
-        should_send=false
-        new_status=""
-
-        if [ $consecutive_up -ge $CONSECUTIVE_CHECKS ] && [ "$last_sent_status" != "on" ]; then
-            should_send=true
-            new_status="on"
+        # Send update every CONSECUTIVE_CHECKS if all checks were same
+        if [ $consecutive_up -eq $CONSECUTIVE_CHECKS ]; then
             log "${GREEN}→${NC} $CONSECUTIVE_CHECKS consecutive successful pings - sending ON status"
-        elif [ $consecutive_down -ge $CONSECUTIVE_CHECKS ] && [ "$last_sent_status" != "off" ]; then
-            should_send=true
-            new_status="off"
+            send_status "on"
+            consecutive_up=0  # Reset counter after sending
+        elif [ $consecutive_down -eq $CONSECUTIVE_CHECKS ]; then
             log "${RED}→${NC} $CONSECUTIVE_CHECKS consecutive failed pings - sending OFF status"
-        fi
-
-        if [ "$should_send" = true ]; then
-            if send_status "$new_status"; then
-                last_sent_status="$new_status"
-            fi
+            send_status "off"
+            consecutive_down=0  # Reset counter after sending
         fi
 
         sleep "$CHECK_INTERVAL"
@@ -114,3 +104,4 @@ fi
 
 # Run main function
 main
+

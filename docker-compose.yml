@@ -14,6 +14,7 @@ services:
       - API_TOKEN=${API_TOKEN}
       - POWER_STATUS_FILE=/data/power_status.txt
       - LAST_STATUS_FILE=/data/last_status.txt
+      - TIMEZONE=${TIMEZONE:-Europe/Kyiv}
     volumes:
       - power-data:/data
     env_file:

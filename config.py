@@ -1,4 +1,5 @@
 import os
+import pytz
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -15,6 +16,9 @@ API_TOKEN = os.getenv('API_TOKEN')
 # File Configuration
 POWER_STATUS_FILE = os.getenv('POWER_STATUS_FILE', 'power_status.txt')
 LAST_STATUS_FILE = os.getenv('LAST_STATUS_FILE', 'last_status.txt')
+
+# Timezone Configuration
+TIMEZONE = pytz.timezone(os.getenv('TIMEZONE', 'Europe/Kyiv'))
 
 # Validate required environment variables
 if not TELEGRAM_BOT_TOKEN:

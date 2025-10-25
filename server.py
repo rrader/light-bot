@@ -5,7 +5,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, request, jsonify
 from bot import telegram_bot
-from config import API_TOKEN, POWER_STATUS_FILE
+from config import API_TOKEN, POWER_STATUS_FILE, TIMEZONE
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -14,6 +14,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Create a dedicated event loop for async operations
+_loop = None
+
+def get_or_create_eventloop():
+    """Get or create event loop for async operations"""
+    global _loop
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+        return _loop
 
 
 def require_api_token(f):
@@ -38,9 +51,9 @@ def require_api_token(f):
 
 
 def write_power_status(status: str):
-    """Write power status to file with timestamp"""
+    """Write power status to file with timestamp in Kyiv timezone"""
     try:
-        timestamp = datetime.now().isoformat()
+        timestamp = datetime.now(TIMEZONE).isoformat()
         with open(POWER_STATUS_FILE, 'w') as f:
             f.write(f"{status}\n")
             f.write(f"Last updated: {timestamp}\n")
@@ -112,9 +125,12 @@ def update_power_status():
         notification_sent = False
         if status_changed:
             emoji = '🟢' if status == 'on' else '🔴'
-            message = f"{emoji} <b>Power Status Changed</b>\n\nNew Status: <b>{status.upper()}</b>\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            kyiv_time = datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')
+            message = f"{emoji} <b>Power Status Changed</b>\n\nNew Status: <b>{status.upper()}</b>\nTime: {kyiv_time}"
 
-            asyncio.run(telegram_bot.send_message(message))
+            # Use event loop to send message
+            loop = get_or_create_eventloop()
+            loop.run_until_complete(telegram_bot.send_message(message))
             notification_sent = True
             logger.info(f"Status changed to {status}, notification sent")
         else:
