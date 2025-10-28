@@ -2,17 +2,16 @@ import logging
 import asyncio
 import hashlib
 import os
-from datetime import datetime, time as dt_time
-from typing import Optional
+from datetime import datetime, time as dt_time, timedelta
+from typing import Optional, List
 from telegram import Bot
 from telegram.error import TelegramError
 
-from yasno_hass import client as yasno_client, YasnoAPIComponent, YasnoAPIOutage, merge_intervals, YasnoOutage
+from yasno_hass import client as yasno_client, YasnoScheduleResponse, PowerSlot, SlotType
 from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
     TIMEZONE,
-    YASNO_CITY,
     YASNO_GROUP,
     SCHEDULE_CHECK_INTERVAL,
     SCHEDULE_EVENING_HOUR,
@@ -31,31 +30,36 @@ class ScheduleFormatter:
     """Format Yasno power outage schedules for Telegram messages"""
 
     @staticmethod
-    def format_outages(outages: list[YasnoAPIOutage], today: bool = True) -> str:
-        """Format list of outages into readable time ranges using helper functions"""
-        if not outages:
-            return "✅ Немає планових відключень"
+    def minutes_to_time(minutes: int) -> str:
+        """Convert minutes from midnight to HH:MM format"""
+        hours = minutes // 60
+        mins = minutes % 60
+        return f"{hours:02d}:{mins:02d}"
 
-        # Sort outages by start time first (merge_intervals expects sorted input)
-        sorted_outages = sorted(outages, key=lambda x: x.start)
+    @staticmethod
+    def get_outage_slots(slots: List[PowerSlot]) -> List[PowerSlot]:
+        """Filter slots to get only Definite outages"""
+        return [slot for slot in slots if slot.type == SlotType.DEFINITE]
 
-        # Use merge_intervals helper from yasno_hass to merge consecutive intervals
-        # This returns list[YasnoOutage] with datetime objects (timezone-aware)
-        merged_outages = merge_intervals(sorted_outages, today=today)
+    @staticmethod
+    def format_outage_slots(slots: List[PowerSlot]) -> str:
+        """Format outage slots into readable time ranges"""
+        outage_slots = ScheduleFormatter.get_outage_slots(slots)
 
-        # Format merged intervals with datetime objects (already timezone-aware!)
+        if not outage_slots:
+            return "✅ Відключень немає"
+
         formatted = []
-        for outage in merged_outages:
-            start_str = outage.start.strftime('%H:%M')
-            end_str = outage.end.strftime('%H:%M')
+        for slot in outage_slots:
+            start_str = ScheduleFormatter.minutes_to_time(slot.start)
+            end_str = ScheduleFormatter.minutes_to_time(slot.end)
             formatted.append(f"⚡️ {start_str} - {end_str}")
 
         return "\n".join(formatted)
 
     @staticmethod
     def format_schedule_message(
-        schedule_data: YasnoAPIComponent,
-        city: str,
+        schedule_data: YasnoScheduleResponse,
         group: str,
         for_tomorrow: bool = False
     ) -> str:
@@ -63,19 +67,37 @@ class ScheduleFormatter:
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
 
-        # Currently Yasno API returns weekly "schedule" with POSSIBLE_OUTAGE
-        # The dailySchedule field only appears when there are DEFINITE_OUTAGE
-        # For now, we show "no restrictions" message
         emoji = "🌙" if for_tomorrow else "☀️"
         day_label = "завтра" if for_tomorrow else "сьогодні"
 
+        # Get group schedule
+        group_schedule = schedule_data.get_group(group)
+        if not group_schedule:
+            return f"❌ Група {group} не знайдена в графіку"
+
+        # Get day schedule
+        day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
+
+        # Format the date
+        date_str = day_schedule.date.strftime('%d.%m.%Y')
+        weekday_names = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя']
+        weekday = weekday_names[day_schedule.date.weekday()]
+
+        # Format outages
+        outages_text = ScheduleFormatter.format_outage_slots(day_schedule.slots)
+
+        # Determine status message
+        status_msg = ""
+        if day_schedule.status == "WaitingForSchedule":
+            status_msg = "⏳ Очікування підтвердження графіку\n\n"
+
         message = (
             f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
-            f"📍 Місто: <b>{city.capitalize()}</b>\n"
-            f"🏠 Група: <b>{group}</b>\n\n"
-            f"✅ <b>Обмежень від НЕК «Укренерго» немає</b>\n\n"
-            f"Планові відключення за графіками не застосовуються.\n"
-            f"Якщо у вас немає електропостачання, зверніться до вашого оператора системи розподілу.\n\n"
+            f"🏠 Група: <b>{group}</b>\n"
+            f"📅 {weekday}, {date_str}\n\n"
+            f"{status_msg}"
+            f"<b>Планові відключення:</b>\n"
+            f"{outages_text}\n\n"
             f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
         )
 
@@ -88,7 +110,6 @@ class ScheduleService:
     def __init__(self):
         self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
         self.channel_id = TELEGRAM_SCHEDULE_CHANNEL_ID
-        self.city = YASNO_CITY
         self.group = YASNO_GROUP
         self.formatter = ScheduleFormatter()
         self.monitoring = False
@@ -104,7 +125,7 @@ class ScheduleService:
             logger.error(f"Error reading schedule hash file: {e}")
         return None
 
-    def _write_last_hash(self, hash_value: str):
+    def _write_last_hash(self, hash_value: str) -> None:
         """Write last schedule hash to file"""
         try:
             with open(LAST_SCHEDULE_HASH_FILE, 'w') as f:
@@ -113,69 +134,56 @@ class ScheduleService:
         except Exception as e:
             logger.error(f"Error writing schedule hash file: {e}")
 
-    def _compute_schedule_hash(self, schedule_data: YasnoAPIComponent) -> Optional[str]:
+    def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse) -> Optional[str]:
         """Compute hash of current schedule to detect changes"""
         try:
-            if not schedule_data or not schedule_data.schedule:
+            if not schedule_data:
                 return None
 
-            city_schedule = schedule_data.schedule.get(self.city)
-            if not city_schedule:
+            group_schedule = schedule_data.get_group(self.group)
+            if not group_schedule:
                 return None
 
-            group_key = f"group_{self.group}"
-            if group_key not in city_schedule:
-                return None
-
-            # Weekly schedule is a list of 7 days, each with outages
-            weekly_outages = city_schedule[group_key]
-
-            # Create a string representation of the entire weekly schedule
-            schedule_str = f"{self.city}|{self.group}|"
+            # Create hash from today's slots
+            schedule_str = f"{self.group}|{group_schedule.today.date}|"
             schedule_str += "|".join([
-                str(day_outages) for day_outages in weekly_outages
+                f"{slot.start}-{slot.end}-{slot.type}"
+                for slot in group_schedule.today.slots
             ])
 
-            # Compute hash
             return hashlib.sha256(schedule_str.encode()).hexdigest()
         except Exception as e:
             logger.error(f"Error computing schedule hash: {e}")
             return None
 
-    async def send_schedule(self, for_tomorrow: bool = False):
+    async def send_schedule(self, for_tomorrow: bool = False) -> bool:
         """Fetch and send schedule to Telegram channel"""
         try:
-            logger.info(f"Fetching schedule from Yasno API (tomorrow={for_tomorrow})...")
+            logger.info(f"Fetching schedule (tomorrow={for_tomorrow})...")
             schedule_data = yasno_client.update()
 
             if not schedule_data:
                 logger.error("Failed to fetch schedule data from Yasno API")
                 return False
 
-            # Log the fetched schedule data
-            logger.info(f"API returned: template={schedule_data.template_name}, regions={schedule_data.available_regions}")
-            logger.info(f"Has schedule (weekly): {schedule_data.schedule is not None}")
-
-            if schedule_data.schedule and self.city in schedule_data.schedule:
-                city_schedule = schedule_data.schedule[self.city]
-                group_key = f"group_{self.group}"
-                if group_key in city_schedule:
-                    logger.info(f"Weekly schedule found for group {self.group}")
-                    logger.info(f"Schedule has {len(city_schedule[group_key])} days")
-                else:
-                    logger.info(f"Group {group_key} not found in schedule")
+            # Log the fetched data
+            group_schedule = schedule_data.get_group(self.group)
+            if group_schedule:
+                day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
+                outage_slots = self.formatter.get_outage_slots(day_schedule.slots)
+                logger.info(f"Schedule for group {self.group}: {len(outage_slots)} outage slots")
+                logger.info(f"Date: {day_schedule.date}, Status: {day_schedule.status}")
             else:
-                logger.info("No schedule data available (API returned empty schedule)")
+                logger.warning(f"Group {self.group} not found in API response")
 
             message = self.formatter.format_schedule_message(
                 schedule_data,
-                self.city,
                 self.group,
                 for_tomorrow=for_tomorrow
             )
 
-            # Print the formatted message to console
-            logger.info(f"Formatted schedule message:\n{message}")
+            # Print the formatted message
+            logger.info(f"Formatted message:\n{message}")
 
             await self.bot.send_message(
                 chat_id=self.channel_id,
@@ -217,7 +225,6 @@ class ScheduleService:
                     "Оновлений графік на сьогодні:\n"
                 )
 
-                # Send change alert
                 await self.bot.send_message(
                     chat_id=self.channel_id,
                     text=change_message,

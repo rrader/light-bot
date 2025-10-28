@@ -23,7 +23,7 @@ class TestScheduleFormatter:
     def test_format_outages_single_interval(self):
         """Test formatting single outage interval"""
         outages = [
-            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)
+            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.DEFINITE_OUTAGE)
         ]
         result = ScheduleFormatter.format_outages(outages)
         assert "⚡️ 08:00 - 12:00" in result
@@ -31,9 +31,9 @@ class TestScheduleFormatter:
     def test_format_outages_consecutive_intervals(self):
         """Test formatting consecutive intervals - should merge"""
         outages = [
-            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=9.0, end=9.5, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=9.0, end=9.5, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
         result = ScheduleFormatter.format_outages(outages)
         # Should merge into single interval
@@ -44,8 +44,8 @@ class TestScheduleFormatter:
     def test_format_outages_non_consecutive_intervals(self):
         """Test formatting non-consecutive intervals - should not merge"""
         outages = [
-            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
         result = ScheduleFormatter.format_outages(outages)
         assert "08:00 - 09:00" in result
@@ -55,8 +55,8 @@ class TestScheduleFormatter:
     def test_format_outages_unsorted_intervals(self):
         """Test formatting unsorted intervals - should sort first"""
         outages = [
-            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
         result = ScheduleFormatter.format_outages(outages)
         lines = result.strip().split('\n')
@@ -70,8 +70,8 @@ class TestScheduleFormatter:
         assert "❌" in result
         assert "недоступний" in result
 
-    def test_format_schedule_message_no_restrictions(self):
-        """Test formatting when no restrictions from Ukrenergo"""
+    def test_format_schedule_message_no_schedule_data(self):
+        """Test formatting when no schedule data available"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
@@ -79,18 +79,25 @@ class TestScheduleFormatter:
             schedule=None
         )
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
-        assert "✅" in result
-        assert "Обмежень від НЕК «Укренерго» немає" in result
+        assert "❌" in result
+        assert "недоступний" in result
         assert "kiev" in result.lower()
         assert "2.1" in result
 
     def test_format_schedule_message_with_outages_today(self):
-        """Test formatting schedule - currently always shows no restrictions"""
+        """Test formatting schedule with weekly outages"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
             title="Графік відключень",
-            schedule=None
+            schedule={
+                "kiev": {
+                    "group_2.1": [
+                        [{"start": 8.0, "end": 12.0, "type": "POSSIBLE_OUTAGE"}],  # Today
+                        [{"start": 10.0, "end": 14.0, "type": "POSSIBLE_OUTAGE"}],  # Tomorrow
+                    ]
+                }
+            }
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", for_tomorrow=False)
@@ -99,49 +106,66 @@ class TestScheduleFormatter:
         assert "СЬОГОДНІ" in result
         assert "kiev" in result.lower()
         assert "2.1" in result
-        assert "Обмежень від НЕК «Укренерго» немає" in result
+        assert "Можливі відключення" in result
+        assert "08:00" in result
+        assert "12:00" in result
 
     def test_format_schedule_message_with_outages_tomorrow(self):
-        """Test formatting schedule for tomorrow - currently shows no restrictions"""
+        """Test formatting schedule for tomorrow"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
             title="Графік відключень",
-            schedule=None
+            schedule={
+                "kiev": {
+                    "group_2.1": [
+                        [{"start": 8.0, "end": 12.0, "type": "POSSIBLE_OUTAGE"}],  # Today
+                        [{"start": 14.0, "end": 18.0, "type": "POSSIBLE_OUTAGE"}],  # Tomorrow
+                    ]
+                }
+            }
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", for_tomorrow=True)
 
         assert "🌙" in result
         assert "ЗАВТРА" in result
-        assert "Обмежень від НЕК «Укренерго» немає" in result
+        assert "Можливі відключення" in result
+        assert "14:00" in result
+        assert "18:00" in result
 
     def test_format_schedule_message_missing_group(self):
-        """Test formatting when no schedule available"""
+        """Test formatting when group is missing from schedule"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
-            schedule=None
+            schedule={
+                "kiev": {
+                    "group_1.1": [[]]  # Different group
+                }
+            }
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
-        # When no schedule, shows no restrictions message
-        assert "✅" in result
-        assert "Обмежень від НЕК «Укренерго» немає" in result
+        assert "❌" in result
+        assert "2.1" in result
+        assert "не знайдена" in result
 
     def test_format_schedule_message_missing_city(self):
-        """Test formatting when no schedule available"""
+        """Test formatting when city is missing from schedule"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
-            schedule=None
+            schedule={
+                "dnipro": {  # Different city
+                    "group_2.1": [[]]
+                }
+            }
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
-        # When no schedule, shows "no restrictions" message
-        assert "✅" in result
-        assert "Обмежень від НЕК «Укренерго» немає" in result
-        assert "kiev" in result.lower()
+        assert "❌" in result
+        assert "недоступний" in result
 
 
 class TestScheduleService:
@@ -256,10 +280,17 @@ class TestScheduleService:
     async def test_send_schedule_success(self, service):
         """Test successful schedule sending"""
         with patch('schedule_service.yasno_client') as mock_client:
-            # Mock API response
+            # Mock API response with weekly schedule
             mock_data = YasnoAPIComponent(
                 template_name="test",
-                schedule=None
+                schedule={
+                    "kiev": {
+                        "group_2.1": [
+                            [{"start": 8.0, "end": 12.0, "type": "POSSIBLE_OUTAGE"}],  # Today
+                            [{"start": 10.0, "end": 14.0, "type": "POSSIBLE_OUTAGE"}],  # Tomorrow
+                        ]
+                    }
+                }
             )
             mock_client.update.return_value = mock_data
 

@@ -1,72 +1,60 @@
-# Data models
-from typing import List, Optional, Annotated
+# Data models for Yasno Blackout API
+from typing import List, Optional, Dict
 from enum import Enum
-from datetime import datetime, date
+from datetime import datetime
 from pydantic import BaseModel
-import re
 import logging
-import pytz
-
-from pydantic.functional_validators import AfterValidator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Kyiv timezone for all datetime operations
-KYIV_TZ = pytz.timezone('Europe/Kyiv')
+
+class SlotType(str, Enum):
+    """Types of power slots"""
+    DEFINITE = "Definite"  # Definite outage
+    NOT_PLANNED = "NotPlanned"  # Power is on
+    MAYBE = "Maybe"  # Possible outage
 
 
-class YasnoOutageType(str, Enum):
-    OFF = "DEFINITE_OUTAGE"
+class ScheduleStatus(str, Enum):
+    """Schedule status"""
+    SCHEDULE_APPLIES = "ScheduleApplies"
+    WAITING_FOR_SCHEDULE = "WaitingForSchedule"
 
 
-class YasnoAPIOutage(BaseModel):
-    start: float
-    end: float
-    type: YasnoOutageType
+class PowerSlot(BaseModel):
+    """A single power slot in minutes from midnight"""
+    start: int  # Minutes from midnight (0-1440)
+    end: int    # Minutes from midnight (0-1440)
+    type: SlotType
 
 
-class YasnoDailyScheduleEntity(BaseModel):
-    title: str
-    groups: dict[str, List[YasnoAPIOutage]]
+class DaySchedule(BaseModel):
+    """Schedule for a single day"""
+    slots: List[PowerSlot]
+    date: datetime
+    status: ScheduleStatus
 
 
-class YasnoDailySchedule(BaseModel):
-    today: Optional[YasnoDailyScheduleEntity] = None
-    tomorrow: Optional[YasnoDailyScheduleEntity] = None
+class GroupSchedule(BaseModel):
+    """Schedule for a power group"""
+    today: DaySchedule
+    tomorrow: DaySchedule
+    updatedOn: datetime
 
 
-def is_unix_timestamp(v: int) -> int:
-    assert v > 0, f"'{v}' is not unix timestamp."
-    return v
+class YasnoScheduleResponse:
+    """Full API response with all groups"""
 
+    def __init__(self, data: Dict[str, dict]):
+        """Initialize with raw dict data"""
+        self._data = {}
+        for group_key, group_data in data.items():
+            self._data[group_key] = GroupSchedule(**group_data)
 
-UnixTimestamp = Annotated[int, AfterValidator(is_unix_timestamp)]
+    def get_group(self, group: str) -> Optional[GroupSchedule]:
+        """Get schedule for a specific group"""
+        return self._data.get(group)
 
-
-class YasnoAPIComponent(BaseModel):
-    template_name: str
-    available_regions: List[str] = list()
-    title: Optional[str] = None
-    description: Optional[str] = None
-    lastRegistryUpdateTime: Optional[UnixTimestamp] = 0
-    schedule: Optional[dict[str, dict]] = None  # Weekly schedule with outages per group
-
-
-class YasnoAPIResponse(BaseModel):
-    components: List[YasnoAPIComponent] = list()
-
-
-class YasnoOutage(YasnoAPIOutage):
-    start: datetime
-    end: datetime
-
-
-class DailyGroupSchedule(BaseModel):
-    title: str = "Data unavailable"
-    schedule: List[YasnoOutage] = list()
-
-
-class SensorEntityData(BaseModel):
-    group: str
-    today: Optional[DailyGroupSchedule]
-    tomorrow: Optional[DailyGroupSchedule]
+    def all_groups(self) -> List[str]:
+        """Get list of all available group keys"""
+        return list(self._data.keys())

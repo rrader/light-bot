@@ -107,19 +107,19 @@ class TestToOutageFunction:
 
     def test_to_outage_today(self):
         """Test creating outage for today"""
-        outage = to_outage(8.0, 12.0, today=True, outage_type=YasnoOutageType.OFF)
+        outage = to_outage(8.0, 12.0, today=True, outage_type=YasnoOutageType.DEFINITE_OUTAGE)
 
         assert isinstance(outage.start, datetime)
         assert isinstance(outage.end, datetime)
         assert outage.start.hour == 8
         assert outage.end.hour == 12
-        assert outage.type == YasnoOutageType.OFF
+        assert outage.type == YasnoOutageType.DEFINITE_OUTAGE
         assert outage.start.tzinfo is not None
         assert outage.end.tzinfo is not None
 
     def test_to_outage_tomorrow(self):
         """Test creating outage for tomorrow"""
-        outage = to_outage(8.0, 12.0, today=False, outage_type=YasnoOutageType.OFF)
+        outage = to_outage(8.0, 12.0, today=False, outage_type=YasnoOutageType.DEFINITE_OUTAGE)
 
         now = datetime.now(KYIV_TZ)
         tomorrow = now + timedelta(days=1)
@@ -129,7 +129,7 @@ class TestToOutageFunction:
 
     def test_to_outage_half_hours(self):
         """Test creating outage with half-hour times"""
-        outage = to_outage(8.5, 12.5, today=True, outage_type=YasnoOutageType.OFF)
+        outage = to_outage(8.5, 12.5, today=True, outage_type=YasnoOutageType.DEFINITE_OUTAGE)
 
         assert outage.start.hour == 8
         assert outage.start.minute == 30
@@ -138,7 +138,7 @@ class TestToOutageFunction:
 
     def test_to_outage_span_calculation(self):
         """Test that outage duration is calculated correctly"""
-        outage = to_outage(8.0, 12.0, today=True, outage_type=YasnoOutageType.OFF)
+        outage = to_outage(8.0, 12.0, today=True, outage_type=YasnoOutageType.DEFINITE_OUTAGE)
 
         duration = outage.end - outage.start
         expected_duration = timedelta(hours=4)
@@ -157,7 +157,7 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_single_interval(self):
         """Test merging single interval"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)
+            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.DEFINITE_OUTAGE)
         ]
 
         result = merge_intervals(intervals, today=True)
@@ -169,9 +169,9 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_consecutive(self):
         """Test merging consecutive intervals"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=9.0, end=9.5, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=9.0, end=9.5, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
 
         result = merge_intervals(intervals, today=True)
@@ -186,9 +186,9 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_non_consecutive(self):
         """Test merging non-consecutive intervals"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=16.0, end=17.0, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=16.0, end=17.0, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
 
         result = merge_intervals(intervals, today=True)
@@ -199,9 +199,9 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_mixed(self):
         """Test merging mix of consecutive and non-consecutive intervals"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=12.0, end=13.0, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
 
         result = merge_intervals(intervals, today=True)
@@ -216,8 +216,8 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_preserves_timezone(self):
         """Test that merged intervals preserve timezone"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.OFF),
-            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.OFF),
+            YasnoAPIOutage(start=8.0, end=8.5, type=YasnoOutageType.DEFINITE_OUTAGE),
+            YasnoAPIOutage(start=8.5, end=9.0, type=YasnoOutageType.DEFINITE_OUTAGE),
         ]
 
         result = merge_intervals(intervals, today=True)
@@ -228,7 +228,7 @@ class TestMergeIntervalsFunction:
     def test_merge_intervals_tomorrow_flag(self):
         """Test that tomorrow flag correctly adds one day"""
         intervals = [
-            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)
+            YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.DEFINITE_OUTAGE)
         ]
 
         result_today = merge_intervals(intervals, today=True)
@@ -284,26 +284,26 @@ class TestYasnoAPIOutage:
         outage = YasnoAPIOutage(
             start=8.0,
             end=12.0,
-            type=YasnoOutageType.OFF
+            type=YasnoOutageType.DEFINITE_OUTAGE
         )
 
         assert outage.start == 8.0
         assert outage.end == 12.0
-        assert outage.type == YasnoOutageType.OFF
+        assert outage.type == YasnoOutageType.DEFINITE_OUTAGE
 
     def test_yasno_outage_type_enum(self):
         """Test YasnoOutageType enum values"""
-        assert YasnoOutageType.OFF.value == "DEFINITE_OUTAGE"
+        assert YasnoOutageType.DEFINITE_OUTAGE.value == "DEFINITE_OUTAGE"
 
     def test_yasno_api_outage_validation(self):
         """Test Pydantic validation for YasnoAPIOutage"""
         # Should accept valid data
-        outage = YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)
+        outage = YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.DEFINITE_OUTAGE)
         assert outage is not None
 
         # Should raise error for invalid data
         with pytest.raises(Exception):
-            YasnoAPIOutage(start="invalid", end=12.0, type=YasnoOutageType.OFF)
+            YasnoAPIOutage(start="invalid", end=12.0, type=YasnoOutageType.DEFINITE_OUTAGE)
 
 
 class TestYasnoAPIComponent:

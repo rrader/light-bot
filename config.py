@@ -21,8 +21,7 @@ LAST_SCHEDULE_HASH_FILE = os.getenv('LAST_SCHEDULE_HASH_FILE', 'last_schedule_ha
 # Timezone Configuration
 TIMEZONE = pytz.timezone(os.getenv('TIMEZONE', 'Europe/Kyiv'))
 
-# Yasno Schedule Configuration
-YASNO_CITY = os.getenv('YASNO_CITY', 'kiev')
+# Yasno Schedule Configuration (Kiev region only)
 YASNO_GROUP = os.getenv('YASNO_GROUP', '2.1')
 SCHEDULE_CHECK_INTERVAL = int(os.getenv('SCHEDULE_CHECK_INTERVAL', 3600))  # Check every hour
 SCHEDULE_EVENING_HOUR = int(os.getenv('SCHEDULE_EVENING_HOUR', 20))  # 20:00 / 8 PM
