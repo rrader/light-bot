@@ -13,13 +13,18 @@ COPY bot.py .
 COPY server.py .
 COPY config.py .
 COPY main.py .
+COPY schedule_service.py .
 
-# Create data directory for power status files
+# Copy yasno_hass module
+COPY yasno_hass/ yasno_hass/
+
+# Create data directory for status files
 RUN mkdir -p /data
 
 # Set environment variables for file locations
-ENV POWER_STATUS_FILE=/data/power_status.txt
-ENV LAST_STATUS_FILE=/data/last_status.txt
+ENV WATCHDOG_STATUS_FILE=/data/watchdog_status.txt
+ENV BOT_LAST_NOTIFIED_STATUS_FILE=/data/bot_last_notified_status.txt
+ENV LAST_SCHEDULE_HASH_FILE=/data/last_schedule_hash.txt
 
 # Expose the Flask port
 EXPOSE 5000
