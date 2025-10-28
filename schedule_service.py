@@ -16,7 +16,10 @@ from config import (
     SCHEDULE_CHECK_INTERVAL,
     SCHEDULE_EVENING_HOUR,
     SCHEDULE_EVENING_MINUTE,
+    SCHEDULE_TOMORROW_START_HOUR,
     LAST_SCHEDULE_HASH_FILE,
+    LAST_CHECK_DATE_FILE,
+    TOMORROW_SENT_DATE_FILE,
 )
 
 logging.basicConfig(
@@ -115,7 +118,8 @@ class ScheduleService:
         self.formatter = ScheduleFormatter()
         self.monitoring = False
         self.last_schedule_hash = self._read_last_hash()
-        self.last_check_date = None  # Track date to distinguish day changes from schedule changes
+        self.last_check_date = self._read_last_check_date()  # Track date to distinguish day changes from schedule changes
+        self.tomorrow_sent_date = self._read_tomorrow_sent_date()  # Track if tomorrow's schedule was sent today
 
     def _read_last_hash(self) -> Optional[str]:
         """Read last schedule hash from file"""
@@ -135,6 +139,48 @@ class ScheduleService:
             logger.info(f"Schedule hash saved: {hash_value[:8]}...")
         except Exception as e:
             logger.error(f"Error writing schedule hash file: {e}")
+
+    def _read_last_check_date(self) -> Optional[object]:
+        """Read last check date from file"""
+        try:
+            if os.path.exists(LAST_CHECK_DATE_FILE):
+                with open(LAST_CHECK_DATE_FILE, 'r') as f:
+                    date_str = f.read().strip()
+                    if date_str:
+                        return datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception as e:
+            logger.error(f"Error reading last check date file: {e}")
+        return None
+
+    def _write_last_check_date(self, date_value: object) -> None:
+        """Write last check date to file"""
+        try:
+            with open(LAST_CHECK_DATE_FILE, 'w') as f:
+                f.write(date_value.strftime('%Y-%m-%d'))
+            logger.debug(f"Last check date saved: {date_value}")
+        except Exception as e:
+            logger.error(f"Error writing last check date file: {e}")
+
+    def _read_tomorrow_sent_date(self) -> Optional[object]:
+        """Read tomorrow sent date from file"""
+        try:
+            if os.path.exists(TOMORROW_SENT_DATE_FILE):
+                with open(TOMORROW_SENT_DATE_FILE, 'r') as f:
+                    date_str = f.read().strip()
+                    if date_str:
+                        return datetime.strptime(date_str, '%Y-%m-%d').date()
+        except Exception as e:
+            logger.error(f"Error reading tomorrow sent date file: {e}")
+        return None
+
+    def _write_tomorrow_sent_date(self, date_value: object) -> None:
+        """Write tomorrow sent date to file"""
+        try:
+            with open(TOMORROW_SENT_DATE_FILE, 'w') as f:
+                f.write(date_value.strftime('%Y-%m-%d'))
+            logger.info(f"Tomorrow sent date saved: {date_value}")
+        except Exception as e:
+            logger.error(f"Error writing tomorrow sent date file: {e}")
 
     def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse) -> Optional[str]:
         """Compute hash of current schedule to detect changes"""
@@ -203,6 +249,53 @@ class ScheduleService:
             logger.error(f"Error sending schedule: {e}")
             return False
 
+    async def check_tomorrow_schedule(self) -> None:
+        """Check if tomorrow's schedule is available and ready (not WaitingForSchedule)"""
+        try:
+            current_date = datetime.now(TIMEZONE).date()
+
+            # Check if we already sent tomorrow's schedule today
+            if self.tomorrow_sent_date == current_date:
+                logger.debug("Tomorrow's schedule already sent today")
+                return
+
+            # Check if it's time to start checking (after SCHEDULE_TOMORROW_START_HOUR)
+            current_hour = datetime.now(TIMEZONE).hour
+            if current_hour < SCHEDULE_TOMORROW_START_HOUR:
+                logger.debug(f"Too early to check tomorrow's schedule (current: {current_hour}h, start: {SCHEDULE_TOMORROW_START_HOUR}h)")
+                return
+
+            logger.info("Checking if tomorrow's schedule is ready...")
+            schedule_data = yasno_client.update()
+
+            if not schedule_data:
+                logger.error("Failed to fetch schedule data")
+                return
+
+            group_schedule = schedule_data.get_group(self.group)
+            if not group_schedule:
+                logger.warning(f"Group {self.group} not found in schedule")
+                return
+
+            tomorrow_schedule = group_schedule.tomorrow
+
+            # Check if tomorrow's schedule is confirmed (not waiting)
+            if tomorrow_schedule.status != "WaitingForSchedule":
+                logger.info(f"Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
+
+                # Send tomorrow's schedule
+                await self.send_schedule(for_tomorrow=True)
+
+                # Mark that we sent tomorrow's schedule today
+                self.tomorrow_sent_date = current_date
+                self._write_tomorrow_sent_date(current_date)
+                logger.info(f"Tomorrow's schedule sent and marked for date: {current_date}")
+            else:
+                logger.info(f"Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
+
+        except Exception as e:
+            logger.error(f"Error checking tomorrow's schedule: {e}")
+
     async def check_schedule_changes(self):
         """Check if schedule has changed and notify if it has"""
         try:
@@ -253,6 +346,7 @@ class ScheduleService:
 
             # Update the last check date
             self.last_check_date = current_date
+            self._write_last_check_date(current_date)
 
         except Exception as e:
             logger.error(f"Error checking schedule changes: {e}")
@@ -262,29 +356,14 @@ class ScheduleService:
         logger.info(f"Starting schedule monitoring (check interval: {SCHEDULE_CHECK_INTERVAL}s)")
         self.monitoring = True
 
-        evening_time = dt_time(SCHEDULE_EVENING_HOUR, SCHEDULE_EVENING_MINUTE)
-        last_evening_send_date = None
-
         while self.monitoring:
             try:
                 now = datetime.now(TIMEZONE)
-                current_time = now.time()
                 current_date = now.date()
 
-                # Check if it's time to send evening schedule (tomorrow's schedule)
-                # Use time window to avoid missing the exact minute
-                target_minutes = evening_time.hour * 60 + evening_time.minute
-                current_minutes = current_time.hour * 60 + current_time.minute
-                check_interval_minutes = SCHEDULE_CHECK_INTERVAL // 60
-
-                # Check if we're within the check interval of the target time
-                # and haven't sent today yet
-                if (abs(current_minutes - target_minutes) <= check_interval_minutes and
-                    last_evening_send_date != current_date):
-
-                    logger.info(f"Time window reached for evening schedule (target: {evening_time}, current: {current_time})")
-                    await self.send_schedule(for_tomorrow=True)
-                    last_evening_send_date = current_date
+                # Check if tomorrow's schedule is ready (starts at SCHEDULE_TOMORROW_START_HOUR)
+                # This will automatically send when status != "WaitingForSchedule"
+                await self.check_tomorrow_schedule()
 
                 # Check for schedule changes (every SCHEDULE_CHECK_INTERVAL)
                 await self.check_schedule_changes()
