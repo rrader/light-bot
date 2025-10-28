@@ -15,20 +15,6 @@ from yasno_hass import YasnoAPIComponent, YasnoAPIOutage, YasnoOutageType, Yasno
 class TestScheduleFormatter:
     """Test ScheduleFormatter class"""
 
-    def test_format_time_whole_hour(self):
-        """Test formatting whole hour times"""
-        assert ScheduleFormatter.format_time(8.0) == "08:00"
-        assert ScheduleFormatter.format_time(12.0) == "12:00"
-        assert ScheduleFormatter.format_time(0.0) == "00:00"
-        assert ScheduleFormatter.format_time(23.0) == "23:00"
-
-    def test_format_time_half_hour(self):
-        """Test formatting half-hour times"""
-        assert ScheduleFormatter.format_time(8.5) == "08:30"
-        assert ScheduleFormatter.format_time(12.5) == "12:30"
-        assert ScheduleFormatter.format_time(0.5) == "00:30"
-        assert ScheduleFormatter.format_time(23.5) == "23:30"
-
     def test_format_outages_empty_list(self):
         """Test formatting empty outages list"""
         result = ScheduleFormatter.format_outages([])

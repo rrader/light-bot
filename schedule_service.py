@@ -7,7 +7,7 @@ from typing import Optional
 from telegram import Bot
 from telegram.error import TelegramError
 
-from yasno_hass import client as yasno_client, YasnoAPIComponent, YasnoAPIOutage
+from yasno_hass import client as yasno_client, YasnoAPIComponent, YasnoAPIOutage, merge_intervals, YasnoOutage
 from config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
@@ -31,45 +31,23 @@ class ScheduleFormatter:
     """Format Yasno power outage schedules for Telegram messages"""
 
     @staticmethod
-    def format_time(hour_float: float) -> str:
-        """Convert float time (e.g., 12.5 = 12:30) to readable string"""
-        hour = int(hour_float)
-        minute = 30 if (hour_float - hour) > 0 else 0
-        return f"{hour:02d}:{minute:02d}"
-
-    @staticmethod
-    def format_outages(outages: list[YasnoAPIOutage]) -> str:
-        """Format list of outages into readable time ranges"""
+    def format_outages(outages: list[YasnoAPIOutage], today: bool = True) -> str:
+        """Format list of outages into readable time ranges using helper functions"""
         if not outages:
             return "✅ Немає планових відключень"
 
-        # Merge consecutive intervals
-        merged = []
-        current_start = None
-        current_end = None
+        # Sort outages by start time first (merge_intervals expects sorted input)
+        sorted_outages = sorted(outages, key=lambda x: x.start)
 
-        for outage in sorted(outages, key=lambda x: x.start):
-            if current_start is None:
-                current_start = outage.start
-                current_end = outage.end
-            elif outage.start == current_end:
-                # Consecutive interval, extend the current range
-                current_end = outage.end
-            else:
-                # Gap found, save current range and start new one
-                merged.append((current_start, current_end))
-                current_start = outage.start
-                current_end = outage.end
+        # Use merge_intervals helper from yasno_hass to merge consecutive intervals
+        # This returns list[YasnoOutage] with datetime objects (timezone-aware)
+        merged_outages = merge_intervals(sorted_outages, today=today)
 
-        # Add the last range
-        if current_start is not None:
-            merged.append((current_start, current_end))
-
-        # Format merged intervals
+        # Format merged intervals with datetime objects (already timezone-aware!)
         formatted = []
-        for start, end in merged:
-            start_str = ScheduleFormatter.format_time(start)
-            end_str = ScheduleFormatter.format_time(end)
+        for outage in merged_outages:
+            start_str = outage.start.strftime('%H:%M')
+            end_str = outage.end.strftime('%H:%M')
             formatted.append(f"⚡️ {start_str} - {end_str}")
 
         return "\n".join(formatted)
@@ -130,7 +108,8 @@ class ScheduleFormatter:
 
         # Format the message
         title = day_schedule.title
-        outages_text = ScheduleFormatter.format_outages(group_outages)
+        # Pass today=not for_tomorrow to correctly calculate datetime objects
+        outages_text = ScheduleFormatter.format_outages(group_outages, today=not for_tomorrow)
 
         message = (
             f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
