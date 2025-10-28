@@ -115,6 +115,7 @@ class ScheduleService:
         self.formatter = ScheduleFormatter()
         self.monitoring = False
         self.last_schedule_hash = self._read_last_hash()
+        self.last_check_date = None  # Track date to distinguish day changes from schedule changes
 
     def _read_last_hash(self) -> Optional[str]:
         """Read last schedule hash from file"""
@@ -217,12 +218,28 @@ class ScheduleService:
                 logger.warning("Could not compute schedule hash")
                 return
 
+            # Get current date
+            current_date = datetime.now(TIMEZONE).date()
+
+            # Detect if this is a new day
+            is_new_day = self.last_check_date is not None and current_date != self.last_check_date
+
             # Compare with last known hash
             if self.last_schedule_hash and current_hash != self.last_schedule_hash:
                 logger.info(f"Schedule changed! Old: {self.last_schedule_hash[:8]}, New: {current_hash[:8]}")
 
+                # Determine if this is a day change or actual schedule change
+                # Day change: show "сьогодні" (today)
+                # Schedule change within same day: show "змінився" (changed)
+                is_schedule_change = not is_new_day
+
+                if is_new_day:
+                    logger.info("Day changed - sending today's schedule (not marked as changed)")
+                else:
+                    logger.info("Schedule changed within the same day")
+
                 # Send updated schedule
-                await self.send_schedule(for_tomorrow=False, change_detected=True)
+                await self.send_schedule(for_tomorrow=False, change_detected=is_schedule_change)
 
                 # Update stored hash
                 self.last_schedule_hash = current_hash
@@ -233,6 +250,9 @@ class ScheduleService:
                 if not self.last_schedule_hash:
                     self.last_schedule_hash = current_hash
                     self._write_last_hash(current_hash)
+
+            # Update the last check date
+            self.last_check_date = current_date
 
         except Exception as e:
             logger.error(f"Error checking schedule changes: {e}")
@@ -252,11 +272,17 @@ class ScheduleService:
                 current_date = now.date()
 
                 # Check if it's time to send evening schedule (tomorrow's schedule)
-                if (current_time.hour == evening_time.hour and
-                    current_time.minute == evening_time.minute and
+                # Use time window to avoid missing the exact minute
+                target_minutes = evening_time.hour * 60 + evening_time.minute
+                current_minutes = current_time.hour * 60 + current_time.minute
+                check_interval_minutes = SCHEDULE_CHECK_INTERVAL // 60
+
+                # Check if we're within the check interval of the target time
+                # and haven't sent today yet
+                if (abs(current_minutes - target_minutes) <= check_interval_minutes and
                     last_evening_send_date != current_date):
 
-                    logger.info("Sending evening schedule (tomorrow)...")
+                    logger.info(f"Time window reached for evening schedule (target: {evening_time}, current: {current_time})")
                     await self.send_schedule(for_tomorrow=True)
                     last_evening_send_date = current_date
 
