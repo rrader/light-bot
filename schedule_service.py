@@ -210,12 +210,31 @@ class ScheduleService:
                 logger.error("Failed to fetch schedule data from Yasno API")
                 return False
 
+            # Log the fetched schedule data
+            if schedule_data.dailySchedule and self.city in schedule_data.dailySchedule:
+                city_schedule = schedule_data.dailySchedule[self.city]
+                if for_tomorrow and city_schedule.tomorrow:
+                    logger.info(f"Tomorrow's schedule: {city_schedule.tomorrow.title}")
+                    if self.group in city_schedule.tomorrow.groups:
+                        outages = city_schedule.tomorrow.groups[self.group]
+                        logger.info(f"Group {self.group} has {len(outages)} outage intervals")
+                elif not for_tomorrow and city_schedule.today:
+                    logger.info(f"Today's schedule: {city_schedule.today.title}")
+                    if self.group in city_schedule.today.groups:
+                        outages = city_schedule.today.groups[self.group]
+                        logger.info(f"Group {self.group} has {len(outages)} outage intervals")
+            else:
+                logger.info("No definite outages scheduled (no restrictions from Ukrenergo)")
+
             message = self.formatter.format_schedule_message(
                 schedule_data,
                 self.city,
                 self.group,
                 for_tomorrow=for_tomorrow
             )
+
+            # Print the formatted message to console
+            logger.info(f"Formatted schedule message:\n{message}")
 
             await self.bot.send_message(
                 chat_id=self.channel_id,
