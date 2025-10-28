@@ -61,14 +61,15 @@ class ScheduleFormatter:
     def format_schedule_message(
         schedule_data: YasnoScheduleResponse,
         group: str,
-        for_tomorrow: bool = False
+        for_tomorrow: bool = False,
+        change_detected: bool = False
     ) -> str:
         """Format complete schedule message for Telegram"""
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
 
-        emoji = "🌙" if for_tomorrow else "☀️"
-        day_label = "завтра" if for_tomorrow else "сьогодні"
+        emoji = "🔔" if change_detected else "🌙" if for_tomorrow else "☀️"
+        day_label = "завтра" if for_tomorrow else "сьогодні" if not change_detected else "змінився"
 
         # Get group schedule
         group_schedule = schedule_data.get_group(group)
@@ -156,7 +157,7 @@ class ScheduleService:
             logger.error(f"Error computing schedule hash: {e}")
             return None
 
-    async def send_schedule(self, for_tomorrow: bool = False) -> bool:
+    async def send_schedule(self, for_tomorrow: bool = False, change_detected: bool = False) -> bool:
         """Fetch and send schedule to Telegram channel"""
         try:
             logger.info(f"Fetching schedule (tomorrow={for_tomorrow})...")
@@ -179,7 +180,8 @@ class ScheduleService:
             message = self.formatter.format_schedule_message(
                 schedule_data,
                 self.group,
-                for_tomorrow=for_tomorrow
+                for_tomorrow=for_tomorrow,
+                change_detected=change_detected
             )
 
             # Print the formatted message
@@ -219,20 +221,8 @@ class ScheduleService:
             if self.last_schedule_hash and current_hash != self.last_schedule_hash:
                 logger.info(f"Schedule changed! Old: {self.last_schedule_hash[:8]}, New: {current_hash[:8]}")
 
-                # Send notification about change
-                change_message = (
-                    "🔔 <b>ГРАФІК ВІДКЛЮЧЕНЬ ЗМІНИВСЯ!</b>\n\n"
-                    "Оновлений графік на сьогодні:\n"
-                )
-
-                await self.bot.send_message(
-                    chat_id=self.channel_id,
-                    text=change_message,
-                    parse_mode='HTML'
-                )
-
                 # Send updated schedule
-                await self.send_schedule(for_tomorrow=False)
+                await self.send_schedule(for_tomorrow=False, change_detected=True)
 
                 # Update stored hash
                 self.last_schedule_hash = current_hash
