@@ -317,7 +317,8 @@ class TestYasnoAPIComponent:
 
         assert component.template_name == "test-template"
         assert component.available_regions == []
-        assert component.dailySchedule == {}
+        assert component.dailySchedule is None
+        assert component.schedule is None
 
     def test_component_creation_full(self):
         """Test creating component with full data"""

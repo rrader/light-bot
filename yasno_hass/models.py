@@ -47,15 +47,21 @@ class YasnoAPIComponent(BaseModel):
     template_name: str
     available_regions: List[str] = list()
     title: Optional[str] = None
+    description: Optional[str] = None
     lastRegistryUpdateTime: Optional[UnixTimestamp] = 0
-    dailySchedule: Optional[dict[str, YasnoDailySchedule]] = dict()
+    dailySchedule: Optional[dict[str, YasnoDailySchedule]] = None
+    schedule: Optional[dict[str, dict]] = None  # Weekly schedule (POSSIBLE_OUTAGE)
 
     @property
     def date_title_today(self) -> date | None:
         if not self.dailySchedule or "kiev" not in self.dailySchedule:
             return None
 
-        schedule_title_today = self.dailySchedule["kiev"].today
+        kiev_schedule = self.dailySchedule.get("kiev")
+        if not kiev_schedule or not kiev_schedule.today:
+            return None
+
+        schedule_title_today = kiev_schedule.today
         # Sample title: "Понеділок, 25.12.2024 на 00:58"
         pattern = r"\d{2}\.\d{2}\.\d{4}"
         match = re.search(pattern, schedule_title_today.title)
