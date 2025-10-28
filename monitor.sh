@@ -3,13 +3,16 @@
 source .env
 
 # Configuration
-TARGET_IP="192.168.1.10"
+TARGET_IP="${TARGET_IP:-192.168.1.152}"
+TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
 API_URL="https://light.rmn.pp.ua/power-status"
 API_TOKEN="${API_TOKEN:-your_api_token_here}"
+UDR_API_KEY="${UDR_API_KEY:-your_udr_api_key_here}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"  # seconds between checks
 PING_TIMEOUT="${PING_TIMEOUT:-2}"      # ping timeout in seconds
 PING_COUNT="${PING_COUNT:-1}"          # number of ping attempts
-CONSECUTIVE_CHECKS="${CONSECUTIVE_CHECKS:-3}"  # number of consecutive checks required
+CONSECUTIVE_CHECKS_ON="${CONSECUTIVE_CHECKS_ON:-3}"   # checks required for ON status
+CONSECUTIVE_CHECKS_OFF="${CONSECUTIVE_CHECKS_OFF:-3}"  # checks required for OFF status
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -25,6 +28,14 @@ log() {
 # Function to check if host is reachable
 check_host() {
     if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$TARGET_IP" > /dev/null 2>&1; then
+        return 0  # Host is up
+    else
+        return 1  # Host is down
+    fi
+}
+
+check_udr_host() {
+    if curl -sk -H "X-API-Key: $UDR_API_KEY" https://localhost/proxy/network/api/s/default/stat/sta | jq -e ".data[] | select(.ip==\"$TARGET_UDR_IP\")" >/dev/null 2>&1; then
         return 0  # Host is up
     else
         return 1  # Host is down
@@ -55,11 +66,13 @@ send_status() {
 # Main monitoring loop
 main() {
     log "${YELLOW}Starting host monitoring...${NC}"
-    log "Target: $TARGET_IP"
+    log "Target IP (ping): $TARGET_IP"
+    log "Target UDR IP: $TARGET_UDR_IP"
     log "API: $API_URL"
     log "Check interval: ${CHECK_INTERVAL}s"
     log "Ping timeout: ${PING_TIMEOUT}s"
-    log "Consecutive checks required: $CONSECUTIVE_CHECKS"
+    log "Consecutive checks for ON: $CONSECUTIVE_CHECKS_ON"
+    log "Consecutive checks for OFF: $CONSECUTIVE_CHECKS_OFF"
     echo ""
 
     # Initialize counters
@@ -67,25 +80,50 @@ main() {
     consecutive_down=0
 
     while true; do
+        # Check both hosts
+        ping_result=false
+        udr_result=false
+
         if check_host; then
+            ping_result=true
+        fi
+
+        if check_udr_host; then
+            udr_result=true
+        fi
+
+        # At least one host must be reachable for UP status
+        # DOWN only when BOTH hosts are unreachable
+        if $ping_result || $udr_result; then
+            # At least one host is up - power is ON
             consecutive_up=$((consecutive_up + 1))
             consecutive_down=0
             status_text="${GREEN}UP${NC}"
+
+            if $ping_result && $udr_result; then
+                detail="(ping: UP, UDR: UP)"
+            elif $ping_result; then
+                detail="(ping: UP, UDR: DOWN)"
+            else
+                detail="(ping: DOWN, UDR: UP)"
+            fi
         else
+            # Both hosts are down - power is OFF
             consecutive_down=$((consecutive_down + 1))
             consecutive_up=0
             status_text="${RED}DOWN${NC}"
+            detail="(ping: DOWN, UDR: DOWN)"
         fi
 
-        log "Host $TARGET_IP is $status_text (up: $consecutive_up, down: $consecutive_down)"
+        log "Hosts status: $status_text $detail (up: $consecutive_up, down: $consecutive_down)"
 
-        # Send update every CONSECUTIVE_CHECKS if all checks were same
-        if [ $consecutive_up -eq $CONSECUTIVE_CHECKS ]; then
-            log "${GREEN}→${NC} $CONSECUTIVE_CHECKS consecutive successful pings - sending ON status"
+        # Send update when required consecutive checks reached
+        if [ $consecutive_up -eq $CONSECUTIVE_CHECKS_ON ]; then
+            log "${GREEN}→${NC} $CONSECUTIVE_CHECKS_ON consecutive checks with at least one host UP - sending ON status"
             send_status "on"
             consecutive_up=0  # Reset counter after sending
-        elif [ $consecutive_down -eq $CONSECUTIVE_CHECKS ]; then
-            log "${RED}→${NC} $CONSECUTIVE_CHECKS consecutive failed pings - sending OFF status"
+        elif [ $consecutive_down -eq $CONSECUTIVE_CHECKS_OFF ]; then
+            log "${RED}→${NC} $CONSECUTIVE_CHECKS_OFF consecutive checks with BOTH hosts DOWN - sending OFF status"
             send_status "off"
             consecutive_down=0  # Reset counter after sending
         fi

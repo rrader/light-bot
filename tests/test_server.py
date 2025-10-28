@@ -95,7 +95,7 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_success_on(self, client, temp_power_file):
         """Test successful power on update"""
-        with patch('server.POWER_STATUS_FILE', temp_power_file), \
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
              patch('server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
@@ -114,7 +114,7 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_success_off(self, client, temp_power_file):
         """Test successful power off update"""
-        with patch('server.POWER_STATUS_FILE', temp_power_file), \
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
              patch('server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
@@ -128,7 +128,7 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_bearer_token(self, client, temp_power_file):
         """Test authentication with Bearer token prefix"""
-        with patch('server.POWER_STATUS_FILE', temp_power_file), \
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
              patch('server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
@@ -150,7 +150,7 @@ class TestPowerStatusEndpoint:
             f.write("on\n")
             f.write("Last updated: 2025-10-25T12:00:00\n")
 
-        with patch('server.POWER_STATUS_FILE', temp_power_file):
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
             response = client.get('/power-status',
                                   headers={'Authorization': 'test_api_token_123'})
 
@@ -161,7 +161,7 @@ class TestPowerStatusEndpoint:
 
     def test_get_power_status_no_file(self, client):
         """Test status retrieval when file doesn't exist"""
-        with patch('server.POWER_STATUS_FILE', '/nonexistent/file.txt'):
+        with patch('server.WATCHDOG_STATUS_FILE', '/nonexistent/file.txt'):
             response = client.get('/power-status',
                                   headers={'Authorization': 'test_api_token_123'})
 
@@ -199,7 +199,7 @@ class TestFileOperations:
         """Test that write_power_status creates file with correct format"""
         from server import write_power_status
 
-        with patch('server.POWER_STATUS_FILE', temp_power_file):
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
             result = write_power_status('on')
 
             assert result is True
@@ -220,7 +220,7 @@ class TestFileOperations:
             f.write("off\n")
             f.write("Last updated: 2025-10-25T12:00:00\n")
 
-        with patch('server.POWER_STATUS_FILE', temp_power_file):
+        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
             status = read_power_status()
 
             assert status['status'] == 'off'

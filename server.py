@@ -5,7 +5,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, request, jsonify
 from bot import telegram_bot
-from config import API_TOKEN, POWER_STATUS_FILE, TIMEZONE
+from config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -54,7 +54,7 @@ def write_power_status(status: str):
     """Write power status to file with timestamp in Kyiv timezone"""
     try:
         timestamp = datetime.now(TIMEZONE).isoformat()
-        with open(POWER_STATUS_FILE, 'w') as f:
+        with open(WATCHDOG_STATUS_FILE, 'w') as f:
             f.write(f"{status}\n")
             f.write(f"Last updated: {timestamp}\n")
         logger.info(f"Power status written to file: {status}")
@@ -67,8 +67,8 @@ def write_power_status(status: str):
 def read_power_status():
     """Read current power status from file"""
     try:
-        if os.path.exists(POWER_STATUS_FILE):
-            with open(POWER_STATUS_FILE, 'r') as f:
+        if os.path.exists(WATCHDOG_STATUS_FILE):
+            with open(WATCHDOG_STATUS_FILE, 'r') as f:
                 lines = f.readlines()
                 if lines:
                     return {

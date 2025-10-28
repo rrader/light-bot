@@ -198,6 +198,10 @@ Response:
 ├── server.py            # Flask server with API endpoints
 ├── config.py            # Configuration and environment variables
 ├── monitor.sh           # Bash script to ping host and update API
+├── yasno_hass/          # Yasno Power Outage API client (adapted from kuzin2006/yasno_hass)
+│   ├── __init__.py      # Module exports and utility functions
+│   ├── api.py           # API client for Yasno power schedule
+│   └── models.py        # Pydantic data models for API responses
 ├── requirements.txt     # Python dependencies
 ├── pytest.ini           # Pytest configuration
 ├── Dockerfile           # Docker image definition
@@ -211,6 +215,7 @@ Response:
 ├── .env                 # Environment variables (not in git)
 ├── .env.example         # Example environment variables
 ├── .gitignore           # Git ignore rules
+├── CLAUDE.md            # Project documentation for Claude Code
 └── README.md            # This file
 ```
 
@@ -516,3 +521,7 @@ This means:
 - Router can send status on every check (no need to track state)
 - API handles deduplication
 - Single source of truth for status changes
+
+## Credits
+
+This project uses code adapted from [yasno_hass](https://github.com/kuzin2006/yasno_hass) by @kuzin2006, a minimalistic Yasno API parser originally designed for Home Assistant. The API client and data models have been adapted to work as a standalone module for monitoring power outages in Ukraine.

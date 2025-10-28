@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from telegram import Bot
 from telegram.error import TelegramError
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, POWER_STATUS_FILE, LAST_STATUS_FILE
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, WATCHDOG_STATUS_FILE, BOT_LAST_NOTIFIED_STATUS_FILE, TIMEZONE
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -67,8 +67,8 @@ class TelegramChannelBot:
     def read_power_status(self):
         """Read current power status from file"""
         try:
-            if os.path.exists(POWER_STATUS_FILE):
-                with open(POWER_STATUS_FILE, 'r') as f:
+            if os.path.exists(WATCHDOG_STATUS_FILE):
+                with open(WATCHDOG_STATUS_FILE, 'r') as f:
                     lines = f.readlines()
                     if lines:
                         return lines[0].strip()
@@ -80,8 +80,8 @@ class TelegramChannelBot:
     def read_last_status(self):
         """Read last known status from file"""
         try:
-            if os.path.exists(LAST_STATUS_FILE):
-                with open(LAST_STATUS_FILE, 'r') as f:
+            if os.path.exists(BOT_LAST_NOTIFIED_STATUS_FILE):
+                with open(BOT_LAST_NOTIFIED_STATUS_FILE, 'r') as f:
                     return f.read().strip()
             return None
         except Exception as e:
@@ -91,7 +91,7 @@ class TelegramChannelBot:
     def write_last_status(self, status: str):
         """Write last known status to file"""
         try:
-            with open(LAST_STATUS_FILE, 'w') as f:
+            with open(BOT_LAST_NOTIFIED_STATUS_FILE, 'w') as f:
                 f.write(status)
             logger.info(f"Last status saved to file: {status}")
         except Exception as e:
@@ -129,7 +129,7 @@ class TelegramChannelBot:
                         f"{emoji} <b>Power Status Changed</b>\n\n"
                         f"New Status: <b>{current_status.upper()}</b>\n"
                         f"Previous Status: <b>{self.last_status.upper() if self.last_status else 'Unknown'}</b>\n"
-                        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        f"Time: {datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M:%S')}"
                     )
 
                     await self.send_message(message)
