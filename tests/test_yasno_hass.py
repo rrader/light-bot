@@ -317,47 +317,43 @@ class TestYasnoAPIComponent:
 
         assert component.template_name == "test-template"
         assert component.available_regions == []
-        assert component.dailySchedule is None
         assert component.schedule is None
 
     def test_component_creation_full(self):
         """Test creating component with full data"""
-        from yasno_hass.models import YasnoDailySchedule
-
         component = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev", "dnipro"],
             title="Графік відключень",
+            description="Test description",
             lastRegistryUpdateTime=1234567890,
-            dailySchedule={"kiev": YasnoDailySchedule()}
+            schedule={"kiev": {"group_2.1": [[]]}}
         )
 
         assert component.template_name == "electricity-outages-daily-schedule"
         assert len(component.available_regions) == 2
         assert "kiev" in component.available_regions
         assert component.title == "Графік відключень"
+        assert component.schedule is not None
 
-    def test_component_date_title_extraction(self):
-        """Test extracting date from title"""
-        from yasno_hass.models import YasnoDailySchedule, YasnoDailyScheduleEntity
-
-        today_entity = YasnoDailyScheduleEntity(
-            title="Понеділок, 28.10.2025 на 00:00",
-            groups={}
-        )
-
+    def test_component_with_schedule(self):
+        """Test creating component with weekly schedule"""
         component = YasnoAPIComponent(
             template_name="test",
-            dailySchedule={
-                "kiev": YasnoDailySchedule(today=today_entity)
+            schedule={
+                "kiev": {
+                    "group_2.1": [
+                        [{"start": 8.0, "end": 12.0, "type": "POSSIBLE_OUTAGE"}],
+                        [{"start": 10.0, "end": 14.0, "type": "POSSIBLE_OUTAGE"}],
+                    ]
+                }
             }
         )
 
-        date = component.date_title_today
-        assert date is not None
-        assert date.day == 28
-        assert date.month == 10
-        assert date.year == 2025
+        assert component.schedule is not None
+        assert "kiev" in component.schedule
+        assert "group_2.1" in component.schedule["kiev"]
+        assert len(component.schedule["kiev"]["group_2.1"]) == 2
 
 
 class TestIntegration:

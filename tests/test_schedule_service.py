@@ -9,7 +9,7 @@ from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import pytz
 
 from schedule_service import ScheduleFormatter, ScheduleService
-from yasno_hass import YasnoAPIComponent, YasnoAPIOutage, YasnoOutageType, YasnoDailySchedule, YasnoDailyScheduleEntity
+from yasno_hass import YasnoAPIComponent, YasnoAPIOutage, YasnoOutageType
 
 
 class TestScheduleFormatter:
@@ -97,7 +97,7 @@ class TestScheduleFormatter:
 
         assert "☀️" in result
         assert "СЬОГОДНІ" in result
-        assert "Kiev" in result.lower()
+        assert "kiev" in result.lower()
         assert "2.1" in result
         assert "Обмежень від НЕК «Укренерго» немає" in result
 

@@ -7,13 +7,9 @@ from .api import YasnoAPIClient, client
 from .models import (
     YasnoAPIComponent,
     YasnoAPIResponse,
-    YasnoDailySchedule,
-    YasnoDailyScheduleEntity,
     YasnoAPIOutage,
     YasnoOutageType,
     YasnoOutage,
-    DailyGroupSchedule,
-    SensorEntityData,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,13 +22,9 @@ __all__ = [
     "client",
     "YasnoAPIComponent",
     "YasnoAPIResponse",
-    "YasnoDailySchedule",
-    "YasnoDailyScheduleEntity",
     "YasnoAPIOutage",
     "YasnoOutageType",
     "YasnoOutage",
-    "DailyGroupSchedule",
-    "SensorEntityData",
     "merge_intervals",
     "to_datetime",
     "to_outage",
