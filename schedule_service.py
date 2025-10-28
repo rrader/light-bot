@@ -16,6 +16,7 @@ from config import (
     SCHEDULE_CHECK_INTERVAL,
     SCHEDULE_EVENING_HOUR,
     SCHEDULE_EVENING_MINUTE,
+    SCHEDULE_CHANGES_START_HOUR,
     SCHEDULE_TOMORROW_START_HOUR,
     LAST_SCHEDULE_HASH_FILE,
     LAST_CHECK_DATE_FILE,
@@ -299,6 +300,15 @@ class ScheduleService:
     async def check_schedule_changes(self):
         """Check if schedule has changed and notify if it has"""
         try:
+            # Check if it's within the allowed time window (SCHEDULE_CHANGES_START_HOUR to SCHEDULE_TOMORROW_START_HOUR)
+            current_hour = datetime.now(TIMEZONE).hour
+            if current_hour < SCHEDULE_CHANGES_START_HOUR:
+                logger.debug(f"Too early to check schedule changes (current: {current_hour}h, start: {SCHEDULE_CHANGES_START_HOUR}h)")
+                return
+            if current_hour >= SCHEDULE_TOMORROW_START_HOUR:
+                logger.debug(f"Too late to check schedule changes (current: {current_hour}h, stop: {SCHEDULE_TOMORROW_START_HOUR}h)")
+                return
+
             logger.info("Checking for schedule changes...")
             schedule_data = yasno_client.update()
 
