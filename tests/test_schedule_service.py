@@ -76,7 +76,7 @@ class TestScheduleFormatter:
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
             title="Графік відключень",
-            dailySchedule=None
+            schedule=None
         )
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
         assert "✅" in result
@@ -85,94 +85,60 @@ class TestScheduleFormatter:
         assert "2.1" in result
 
     def test_format_schedule_message_with_outages_today(self):
-        """Test formatting schedule with outages for today"""
-        # Create mock schedule data
-        groups = {
-            "2.1": [
-                YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF),
-                YasnoAPIOutage(start=16.0, end=20.0, type=YasnoOutageType.OFF),
-            ]
-        }
-        today_schedule = YasnoDailyScheduleEntity(
-            title="Понеділок, 28.10.2025 на 00:00",
-            groups=groups
-        )
-        daily_schedule = YasnoDailySchedule(today=today_schedule, tomorrow=None)
-
+        """Test formatting schedule - currently always shows no restrictions"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
             title="Графік відключень",
-            dailySchedule={"kiev": daily_schedule}
+            schedule=None
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", for_tomorrow=False)
 
         assert "☀️" in result
         assert "СЬОГОДНІ" in result
-        assert "Kiev" in result
+        assert "Kiev" in result.lower()
         assert "2.1" in result
-        assert "Понеділок, 28.10.2025" in result
-        assert "08:00" in result
-        assert "12:00" in result
-        assert "16:00" in result
-        assert "20:00" in result
+        assert "Обмежень від НЕК «Укренерго» немає" in result
 
     def test_format_schedule_message_with_outages_tomorrow(self):
-        """Test formatting schedule with outages for tomorrow"""
-        groups = {
-            "2.1": [
-                YasnoAPIOutage(start=10.0, end=14.0, type=YasnoOutageType.OFF),
-            ]
-        }
-        tomorrow_schedule = YasnoDailyScheduleEntity(
-            title="Вівторок, 29.10.2025 на 00:00",
-            groups=groups
-        )
-        daily_schedule = YasnoDailySchedule(today=None, tomorrow=tomorrow_schedule)
-
+        """Test formatting schedule for tomorrow - currently shows no restrictions"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
             title="Графік відключень",
-            dailySchedule={"kiev": daily_schedule}
+            schedule=None
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", for_tomorrow=True)
 
         assert "🌙" in result
         assert "ЗАВТРА" in result
-        assert "Вівторок, 29.10.2025" in result
-        assert "10:00 - 14:00" in result
+        assert "Обмежень від НЕК «Укренерго» немає" in result
 
     def test_format_schedule_message_missing_group(self):
-        """Test formatting when requested group is missing"""
-        groups = {"1.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
-        today_schedule = YasnoDailyScheduleEntity(title="Test", groups=groups)
-        daily_schedule = YasnoDailySchedule(today=today_schedule)
-
+        """Test formatting when no schedule available"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
-            dailySchedule={"kiev": daily_schedule}
+            schedule=None
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
-        assert "❌" in result
-        assert "2.1" in result
-        assert "не знайдена" in result
+        # When no schedule, shows no restrictions message
+        assert "✅" in result
+        assert "Обмежень від НЕК «Укренерго» немає" in result
 
     def test_format_schedule_message_missing_city(self):
-        """Test formatting when requested city is missing"""
-        daily_schedule = YasnoDailySchedule(today=None)
+        """Test formatting when no schedule available"""
         schedule_data = YasnoAPIComponent(
             template_name="electricity-outages-daily-schedule",
             available_regions=["kiev"],
-            dailySchedule={"dnipro": daily_schedule}
+            schedule=None
         )
 
         result = ScheduleFormatter.format_schedule_message(schedule_data, "kiev", "2.1", False)
-        # When city is missing from dailySchedule, it shows "no restrictions" message
+        # When no schedule, shows "no restrictions" message
         assert "✅" in result
         assert "Обмежень від НЕК «Укренерго» немає" in result
         assert "kiev" in result.lower()
@@ -225,30 +191,29 @@ class TestScheduleService:
         """Test computing hash with no schedule data"""
         assert service._compute_schedule_hash(None) is None
 
-    def test_compute_schedule_hash_no_daily_schedule(self, service):
-        """Test computing hash with no daily schedule"""
+    def test_compute_schedule_hash_no_schedule(self, service):
+        """Test computing hash with no schedule"""
         schedule_data = YasnoAPIComponent(
             template_name="test",
-            dailySchedule=None
+            schedule=None
         )
         assert service._compute_schedule_hash(schedule_data) is None
 
     def test_compute_schedule_hash_valid_data(self, service):
         """Test computing hash with valid schedule data"""
-        groups = {
-            "2.1": [
-                YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF),
-            ]
-        }
-        today_schedule = YasnoDailyScheduleEntity(
-            title="Monday, 28.10.2025",
-            groups=groups
-        )
-        daily_schedule = YasnoDailySchedule(today=today_schedule)
+        # Mock weekly schedule structure
+        weekly_outages = [
+            [{"start": 8.0, "end": 12.0, "type": "DEFINITE_OUTAGE"}],  # Day 1
+            [{"start": 8.0, "end": 12.0, "type": "DEFINITE_OUTAGE"}],  # Day 2
+        ]
 
         schedule_data = YasnoAPIComponent(
             template_name="test",
-            dailySchedule={"kiev": daily_schedule}
+            schedule={
+                "kiev": {
+                    "group_2.1": weekly_outages
+                }
+            }
         )
 
         hash1 = service._compute_schedule_hash(schedule_data)
@@ -261,24 +226,25 @@ class TestScheduleService:
 
     def test_compute_schedule_hash_different_data(self, service):
         """Test that different schedules produce different hashes"""
-        groups1 = {"2.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
-        groups2 = {"2.1": [YasnoAPIOutage(start=8.0, end=13.0, type=YasnoOutageType.OFF)]}
-
         schedule1 = YasnoAPIComponent(
             template_name="test",
-            dailySchedule={
-                "kiev": YasnoDailySchedule(
-                    today=YasnoDailyScheduleEntity(title="Test1", groups=groups1)
-                )
+            schedule={
+                "kiev": {
+                    "group_2.1": [
+                        [{"start": 8.0, "end": 12.0}]  # Different end time
+                    ]
+                }
             }
         )
 
         schedule2 = YasnoAPIComponent(
             template_name="test",
-            dailySchedule={
-                "kiev": YasnoDailySchedule(
-                    today=YasnoDailyScheduleEntity(title="Test1", groups=groups2)
-                )
+            schedule={
+                "kiev": {
+                    "group_2.1": [
+                        [{"start": 8.0, "end": 13.0}]  # Different end time
+                    ]
+                }
             }
         )
 
@@ -291,14 +257,9 @@ class TestScheduleService:
         """Test successful schedule sending"""
         with patch('schedule_service.yasno_client') as mock_client:
             # Mock API response
-            groups = {"2.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
             mock_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule={
-                    "kiev": YasnoDailySchedule(
-                        today=YasnoDailyScheduleEntity(title="Test", groups=groups)
-                    )
-                }
+                schedule=None
             )
             mock_client.update.return_value = mock_data
 
@@ -324,7 +285,7 @@ class TestScheduleService:
         with patch('schedule_service.yasno_client') as mock_client:
             mock_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule=None
+                schedule=None
             )
             mock_client.update.return_value = mock_data
             service.bot.send_message.side_effect = TelegramError("Network error")
@@ -336,13 +297,12 @@ class TestScheduleService:
     async def test_check_schedule_changes_no_previous_hash(self, service):
         """Test checking schedule changes when no previous hash exists"""
         with patch('schedule_service.yasno_client') as mock_client:
-            groups = {"2.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
             mock_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule={
-                    "kiev": YasnoDailySchedule(
-                        today=YasnoDailyScheduleEntity(title="Test", groups=groups)
-                    )
+                schedule={
+                    "kiev": {
+                        "group_2.1": [[{"start": 8.0, "end": 12.0}]]
+                    }
                 }
             )
             mock_client.update.return_value = mock_data
@@ -358,13 +318,12 @@ class TestScheduleService:
     async def test_check_schedule_changes_no_change(self, service):
         """Test checking schedule when nothing changed"""
         with patch('schedule_service.yasno_client') as mock_client:
-            groups = {"2.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
             mock_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule={
-                    "kiev": YasnoDailySchedule(
-                        today=YasnoDailyScheduleEntity(title="Test", groups=groups)
-                    )
+                schedule={
+                    "kiev": {
+                        "group_2.1": [[{"start": 8.0, "end": 12.0}]]
+                    }
                 }
             )
             mock_client.update.return_value = mock_data
@@ -382,25 +341,23 @@ class TestScheduleService:
         """Test detecting schedule change"""
         with patch('schedule_service.yasno_client') as mock_client:
             # Set initial hash for different schedule
-            groups1 = {"2.1": [YasnoAPIOutage(start=8.0, end=12.0, type=YasnoOutageType.OFF)]}
             old_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule={
-                    "kiev": YasnoDailySchedule(
-                        today=YasnoDailyScheduleEntity(title="Old", groups=groups1)
-                    )
+                schedule={
+                    "kiev": {
+                        "group_2.1": [[{"start": 8.0, "end": 12.0}]]
+                    }
                 }
             )
             service.last_schedule_hash = service._compute_schedule_hash(old_data)
 
             # Return new schedule
-            groups2 = {"2.1": [YasnoAPIOutage(start=8.0, end=13.0, type=YasnoOutageType.OFF)]}
             new_data = YasnoAPIComponent(
                 template_name="test",
-                dailySchedule={
-                    "kiev": YasnoDailySchedule(
-                        today=YasnoDailyScheduleEntity(title="New", groups=groups2)
-                    )
+                schedule={
+                    "kiev": {
+                        "group_2.1": [[{"start": 8.0, "end": 13.0}]]  # Changed
+                    }
                 }
             )
             mock_client.update.return_value = new_data

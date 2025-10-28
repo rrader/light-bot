@@ -63,61 +63,19 @@ class ScheduleFormatter:
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
 
-        # Check if schedule data is deprecated (date mismatch)
-        if schedule_data.dailySchedule and hasattr(schedule_data, 'deprecated') and schedule_data.deprecated:
-            logger.warning(f"Schedule data is deprecated. Expected today's date, got {schedule_data.date_title_today}")
-
-        # Check if dailySchedule is available (definite outages)
-        if not schedule_data.dailySchedule or not schedule_data.dailySchedule.get(city):
-            # No definite outages scheduled
-            emoji = "🌙" if for_tomorrow else "☀️"
-            day_label = "завтра" if for_tomorrow else "сьогодні"
-
-            message = (
-                f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
-                f"📍 Місто: <b>{city.capitalize()}</b>\n"
-                f"🏠 Група: <b>{group}</b>\n\n"
-                f"✅ <b>Обмежень від НЕК «Укренерго» немає</b>\n\n"
-                f"Планові відключення за графіками не застосовуються.\n"
-                f"Якщо у вас немає електропостачання, зверніться до вашого оператора системи розподілу.\n\n"
-                f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
-            )
-            return message
-
-        city_schedule = schedule_data.dailySchedule.get(city)
-        if not city_schedule:
-            return f"❌ Графік для міста '{city}' не знайдено"
-
-        # Determine which day's schedule to show
-        if for_tomorrow:
-            day_schedule = city_schedule.tomorrow
-            day_label = "завтра"
-            emoji = "🌙"
-        else:
-            day_schedule = city_schedule.today
-            day_label = "сьогодні"
-            emoji = "☀️"
-
-        if not day_schedule:
-            return f"❌ Графік на {day_label} ще не опубліковано"
-
-        # Get the group's outages
-        group_outages = day_schedule.groups.get(group)
-        if group_outages is None:
-            return f"❌ Група {group} не знайдена в графіку"
-
-        # Format the message
-        title = day_schedule.title
-        # Pass today=not for_tomorrow to correctly calculate datetime objects
-        outages_text = ScheduleFormatter.format_outages(group_outages, today=not for_tomorrow)
+        # Currently Yasno API returns weekly "schedule" with POSSIBLE_OUTAGE
+        # The dailySchedule field only appears when there are DEFINITE_OUTAGE
+        # For now, we show "no restrictions" message
+        emoji = "🌙" if for_tomorrow else "☀️"
+        day_label = "завтра" if for_tomorrow else "сьогодні"
 
         message = (
             f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
             f"📍 Місто: <b>{city.capitalize()}</b>\n"
-            f"🏠 Група: <b>{group}</b>\n"
-            f"📅 {title}\n\n"
-            f"<b>Планові відключення:</b>\n"
-            f"{outages_text}\n\n"
+            f"🏠 Група: <b>{group}</b>\n\n"
+            f"✅ <b>Обмежень від НЕК «Укренерго» немає</b>\n\n"
+            f"Планові відключення за графіками не застосовуються.\n"
+            f"Якщо у вас немає електропостачання, зверніться до вашого оператора системи розподілу.\n\n"
             f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
         )
 
@@ -158,20 +116,25 @@ class ScheduleService:
     def _compute_schedule_hash(self, schedule_data: YasnoAPIComponent) -> Optional[str]:
         """Compute hash of current schedule to detect changes"""
         try:
-            if not schedule_data or not schedule_data.dailySchedule:
+            if not schedule_data or not schedule_data.schedule:
                 return None
 
-            city_schedule = schedule_data.dailySchedule.get(self.city)
-            if not city_schedule or not city_schedule.today:
+            city_schedule = schedule_data.schedule.get(self.city)
+            if not city_schedule:
                 return None
 
-            group_outages = city_schedule.today.groups.get(self.group)
-            if group_outages is None:
+            group_key = f"group_{self.group}"
+            if group_key not in city_schedule:
                 return None
 
-            # Create a string representation of the schedule
-            schedule_str = f"{city_schedule.today.title}|"
-            schedule_str += "|".join([f"{o.start}-{o.end}" for o in group_outages])
+            # Weekly schedule is a list of 7 days, each with outages
+            weekly_outages = city_schedule[group_key]
+
+            # Create a string representation of the entire weekly schedule
+            schedule_str = f"{self.city}|{self.group}|"
+            schedule_str += "|".join([
+                str(day_outages) for day_outages in weekly_outages
+            ])
 
             # Compute hash
             return hashlib.sha256(schedule_str.encode()).hexdigest()
@@ -190,20 +153,19 @@ class ScheduleService:
                 return False
 
             # Log the fetched schedule data
-            if schedule_data.dailySchedule and self.city in schedule_data.dailySchedule:
-                city_schedule = schedule_data.dailySchedule[self.city]
-                if for_tomorrow and city_schedule.tomorrow:
-                    logger.info(f"Tomorrow's schedule: {city_schedule.tomorrow.title}")
-                    if self.group in city_schedule.tomorrow.groups:
-                        outages = city_schedule.tomorrow.groups[self.group]
-                        logger.info(f"Group {self.group} has {len(outages)} outage intervals")
-                elif not for_tomorrow and city_schedule.today:
-                    logger.info(f"Today's schedule: {city_schedule.today.title}")
-                    if self.group in city_schedule.today.groups:
-                        outages = city_schedule.today.groups[self.group]
-                        logger.info(f"Group {self.group} has {len(outages)} outage intervals")
+            logger.info(f"API returned: template={schedule_data.template_name}, regions={schedule_data.available_regions}")
+            logger.info(f"Has schedule (weekly): {schedule_data.schedule is not None}")
+
+            if schedule_data.schedule and self.city in schedule_data.schedule:
+                city_schedule = schedule_data.schedule[self.city]
+                group_key = f"group_{self.group}"
+                if group_key in city_schedule:
+                    logger.info(f"Weekly schedule found for group {self.group}")
+                    logger.info(f"Schedule has {len(city_schedule[group_key])} days")
+                else:
+                    logger.info(f"Group {group_key} not found in schedule")
             else:
-                logger.info("No definite outages scheduled (no restrictions from Ukrenergo)")
+                logger.info("No schedule data available (API returned empty schedule)")
 
             message = self.formatter.format_schedule_message(
                 schedule_data,

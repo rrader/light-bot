@@ -49,33 +49,7 @@ class YasnoAPIComponent(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     lastRegistryUpdateTime: Optional[UnixTimestamp] = 0
-    dailySchedule: Optional[dict[str, YasnoDailySchedule]] = None
-    schedule: Optional[dict[str, dict]] = None  # Weekly schedule (POSSIBLE_OUTAGE)
-
-    @property
-    def date_title_today(self) -> date | None:
-        if not self.dailySchedule or "kiev" not in self.dailySchedule:
-            return None
-
-        kiev_schedule = self.dailySchedule.get("kiev")
-        if not kiev_schedule or not kiev_schedule.today:
-            return None
-
-        schedule_title_today = kiev_schedule.today
-        # Sample title: "Понеділок, 25.12.2024 на 00:58"
-        pattern = r"\d{2}\.\d{2}\.\d{4}"
-        match = re.search(pattern, schedule_title_today.title)
-
-        if match:
-            title_date = match.group()
-            _LOGGER.debug(f"Date found in title: {title_date}")
-            return datetime.strptime(title_date, "%d.%m.%Y").date()
-
-        return None
-
-    @property
-    def deprecated(self) -> bool:
-        return datetime.now(KYIV_TZ).date() != self.date_title_today
+    schedule: Optional[dict[str, dict]] = None  # Weekly schedule with outages per group
 
 
 class YasnoAPIResponse(BaseModel):
