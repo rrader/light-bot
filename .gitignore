@@ -8,7 +8,6 @@ venv/
 env/
 *.log
 watchdog_status.txt
-bot_last_notified_status.txt
 last_schedule_hash.txt
 .pytest_cache/
 .coverage

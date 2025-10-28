@@ -23,7 +23,6 @@ RUN mkdir -p /data
 
 # Set environment variables for file locations
 ENV WATCHDOG_STATUS_FILE=/data/watchdog_status.txt
-ENV BOT_LAST_NOTIFIED_STATUS_FILE=/data/bot_last_notified_status.txt
 ENV LAST_SCHEDULE_HASH_FILE=/data/last_schedule_hash.txt
 
 # Expose the Flask port

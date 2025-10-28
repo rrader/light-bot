@@ -47,9 +47,8 @@ class TestTelegramChannelBot:
 
     def test_initialization(self, bot):
         """Test bot initializes correctly"""
+        assert bot.bot is not None
         assert bot.channel_id == '@test_channel'
-        assert bot.last_status is None
-        assert bot.monitoring is False
 
     @pytest.mark.asyncio
     async def test_send_message_success(self, bot):
@@ -101,116 +100,3 @@ class TestTelegramChannelBot:
         assert result is True
         bot.bot.send_document.assert_called_once()
 
-    def test_read_power_status_file_exists(self, bot, temp_files):
-        """Test reading power status from existing file"""
-        power_file, _ = temp_files
-
-        with open(power_file, 'w') as f:
-            f.write("on\n")
-            f.write("Last updated: 2025-10-25T12:00:00\n")
-
-        with patch('bot.WATCHDOG_STATUS_FILE', power_file):
-            status = bot.read_power_status()
-            assert status == "on"
-
-    def test_read_power_status_file_not_exists(self, bot):
-        """Test reading power status when file doesn't exist"""
-        with patch('bot.WATCHDOG_STATUS_FILE', '/nonexistent/file.txt'):
-            status = bot.read_power_status()
-            assert status is None
-
-    def test_read_last_status(self, bot, temp_files):
-        """Test reading last status from file"""
-        _, last_file = temp_files
-
-        with open(last_file, 'w') as f:
-            f.write("off")
-
-        with patch('bot.BOT_LAST_NOTIFIED_STATUS_FILE', last_file):
-            status = bot.read_last_status()
-            assert status == "off"
-
-    def test_write_last_status(self, bot, temp_files):
-        """Test writing last status to file"""
-        _, last_file = temp_files
-
-        with patch('bot.BOT_LAST_NOTIFIED_STATUS_FILE', last_file):
-            bot.write_last_status("on")
-
-        with open(last_file, 'r') as f:
-            content = f.read()
-            assert content == "on"
-
-    @pytest.mark.asyncio
-    async def test_monitor_power_status_detects_change(self, bot, temp_files):
-        """Test that monitoring detects power status changes"""
-        power_file, last_file = temp_files
-
-        # Setup initial status
-        with open(power_file, 'w') as f:
-            f.write("off\n")
-
-        with patch('bot.WATCHDOG_STATUS_FILE', power_file), \
-             patch('bot.BOT_LAST_NOTIFIED_STATUS_FILE', last_file):
-
-            # Mock send_message
-            bot.send_message = AsyncMock(return_value=True)
-
-            # Start monitoring in background
-            monitor_task = asyncio.create_task(bot.monitor_power_status(check_interval=0.1))
-
-            # Wait a bit for initial status to be read
-            await asyncio.sleep(0.15)
-
-            # Change status
-            with open(power_file, 'w') as f:
-                f.write("on\n")
-
-            # Wait for monitoring to detect change
-            await asyncio.sleep(0.15)
-
-            # Stop monitoring
-            bot.stop_monitoring()
-            await asyncio.sleep(0.05)
-
-            # Cancel the task
-            monitor_task.cancel()
-            try:
-                await monitor_task
-            except asyncio.CancelledError:
-                pass
-
-            # Verify message was sent
-            assert bot.send_message.called
-            assert bot.last_status == "on"
-
-    def test_stop_monitoring(self, bot):
-        """Test stopping the monitoring loop"""
-        bot.monitoring = True
-        bot.stop_monitoring()
-        assert bot.monitoring is False
-
-
-class TestFileOperations:
-    """Test file read/write operations"""
-
-    def test_write_and_read_consistency(self):
-        """Test that written status can be read back correctly"""
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-            temp_file = f.name
-
-        try:
-            with patch('bot.TELEGRAM_BOT_TOKEN', 'test'), \
-                 patch('bot.TELEGRAM_CHANNEL_ID', '@test'), \
-                 patch('bot.Bot'):
-                bot = TelegramChannelBot()
-
-                with patch('bot.BOT_LAST_NOTIFIED_STATUS_FILE', temp_file):
-                    bot.write_last_status("on")
-                    status = bot.read_last_status()
-                    assert status == "on"
-        finally:
-            try:
-                os.unlink(temp_file)
-            except:
-                pass

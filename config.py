@@ -16,7 +16,6 @@ API_TOKEN = os.getenv('API_TOKEN')
 
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
-BOT_LAST_NOTIFIED_STATUS_FILE = os.getenv('BOT_LAST_NOTIFIED_STATUS_FILE', 'bot_last_notified_status.txt')
 LAST_SCHEDULE_HASH_FILE = os.getenv('LAST_SCHEDULE_HASH_FILE', 'last_schedule_hash.txt')
 
 # Timezone Configuration
