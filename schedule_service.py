@@ -183,8 +183,8 @@ class ScheduleService:
         except Exception as e:
             logger.error(f"Error writing tomorrow sent date file: {e}")
 
-    def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse) -> Optional[str]:
-        """Compute hash of current schedule to detect changes"""
+    def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[str]:
+        """Compute hash of schedule to detect changes (date-independent)"""
         try:
             if not schedule_data:
                 return None
@@ -193,11 +193,12 @@ class ScheduleService:
             if not group_schedule:
                 return None
 
-            # Create hash from today's slots
-            schedule_str = f"{self.group}|{group_schedule.today.date}|"
+            # Create hash from slots only (without date to detect actual schedule changes)
+            day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
+            schedule_str = f"{self.group}|"
             schedule_str += "|".join([
                 f"{slot.start}-{slot.end}-{slot.type}"
-                for slot in group_schedule.today.slots
+                for slot in day_schedule.slots
             ])
 
             return hashlib.sha256(schedule_str.encode()).hexdigest()
@@ -287,6 +288,13 @@ class ScheduleService:
                 # Send tomorrow's schedule
                 await self.send_schedule(for_tomorrow=True)
 
+                # Compute and update hash with tomorrow's schedule so we don't notify again when it becomes today
+                tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
+                if tomorrow_hash:
+                    self.last_schedule_hash = tomorrow_hash
+                    self._write_last_hash(tomorrow_hash)
+                    logger.info(f"Updated hash with tomorrow's schedule: {tomorrow_hash[:8]}...")
+
                 # Mark that we sent tomorrow's schedule today
                 self.tomorrow_sent_date = current_date
                 self._write_tomorrow_sent_date(current_date)
@@ -316,7 +324,7 @@ class ScheduleService:
                 logger.error("Failed to fetch schedule data")
                 return
 
-            current_hash = self._compute_schedule_hash(schedule_data)
+            current_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=False)
             if not current_hash:
                 logger.warning("Could not compute schedule hash")
                 return
@@ -331,18 +339,15 @@ class ScheduleService:
             if self.last_schedule_hash and current_hash != self.last_schedule_hash:
                 logger.info(f"Schedule changed! Old: {self.last_schedule_hash[:8]}, New: {current_hash[:8]}")
 
-                # Determine if this is a day change or actual schedule change
-                # Day change: show "сьогодні" (today)
-                # Schedule change within same day: show "змінився" (changed)
-                is_schedule_change = not is_new_day
-
+                # If it's a new day but hash is different, it means actual schedule change
+                # (not just yesterday's schedule that we already announced)
                 if is_new_day:
-                    logger.info("Day changed - sending today's schedule (not marked as changed)")
+                    logger.info("New day with different schedule - sending today's schedule")
                 else:
                     logger.info("Schedule changed within the same day")
 
-                # Send updated schedule
-                await self.send_schedule(for_tomorrow=False, change_detected=is_schedule_change)
+                # Send updated schedule (mark as changed only if not a new day)
+                await self.send_schedule(for_tomorrow=False, change_detected=not is_new_day)
 
                 # Update stored hash
                 self.last_schedule_hash = current_hash
