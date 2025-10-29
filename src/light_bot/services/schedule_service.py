@@ -183,6 +183,12 @@ class ScheduleService:
                 logger.debug(f"Too early to check tomorrow's schedule (current: {current_hour}h, start: {SCHEDULE_TOMORROW_START_HOUR}h)")
                 return
 
+            # Delete hash file before checking - if schedule doesn't appear, morning will send it
+            if os.path.exists(LAST_SCHEDULE_HASH_FILE):
+                os.remove(LAST_SCHEDULE_HASH_FILE)
+                logger.info("Deleted hash file before checking tomorrow's schedule")
+            self.last_schedule_hash = None
+
             logger.info("Checking if tomorrow's schedule is ready...")
             schedule_data = yasno_client.update()
 
@@ -204,19 +210,19 @@ class ScheduleService:
                 # Send tomorrow's schedule
                 await self.send_schedule(for_tomorrow=True)
 
-                # Compute and update hash with tomorrow's schedule so we don't notify again when it becomes today
+                # Save hash with tomorrow's schedule so morning doesn't duplicate
                 tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
                 if tomorrow_hash:
                     self.last_schedule_hash = tomorrow_hash
                     self._write_last_hash(tomorrow_hash)
-                    logger.info(f"Updated hash with tomorrow's schedule: {tomorrow_hash[:8]}...")
+                    logger.info(f"Saved hash with tomorrow's schedule: {tomorrow_hash[:8]}... - morning won't duplicate")
 
                 # Mark that we sent tomorrow's schedule today
                 self.tomorrow_sent_date = current_date
                 self._write_tomorrow_sent_date(current_date)
                 logger.info(f"Tomorrow's schedule sent and marked for date: {current_date}")
             else:
-                logger.info(f"Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
+                logger.info(f"Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status}), hash remains deleted")
 
         except Exception as e:
             logger.error(f"Error checking tomorrow's schedule: {e}")
@@ -252,7 +258,13 @@ class ScheduleService:
             is_new_day = self.last_check_date is not None and current_date != self.last_check_date
 
             # Compare with last known hash
-            if self.last_schedule_hash and current_hash != self.last_schedule_hash:
+            if not self.last_schedule_hash:
+                # No hash file exists - send today's schedule
+                logger.info("No hash file found - sending today's schedule")
+                await self.send_schedule(for_tomorrow=False, change_detected=False)
+                self.last_schedule_hash = current_hash
+                self._write_last_hash(current_hash)
+            elif current_hash != self.last_schedule_hash:
                 logger.info(f"Schedule changed! Old: {self.last_schedule_hash[:8]}, New: {current_hash[:8]}")
 
                 # If it's a new day but hash is different, it means actual schedule change
@@ -270,10 +282,6 @@ class ScheduleService:
                 self._write_last_hash(current_hash)
             else:
                 logger.info("Schedule unchanged")
-                # Update hash even if unchanged (first time setup)
-                if not self.last_schedule_hash:
-                    self.last_schedule_hash = current_hash
-                    self._write_last_hash(current_hash)
 
             # Update the last check date
             self.last_check_date = current_date
