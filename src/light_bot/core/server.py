@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, request, jsonify
 from light_bot.core.bot import telegram_bot
+from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -120,25 +121,13 @@ def update_power_status():
         # Only send notification if status changed
         notification_sent = False
         if status_changed:
-            kyiv_time = datetime.now(TIMEZONE).strftime('%d.%m.%Y %H:%M:%S')
+            timestamp = datetime.now(TIMEZONE)
 
             if status == 'on':
-                # Power is back
-                message = (
-                    "⚡️ <b>Світло з'явилось!</b> ⚡️\n\n"
-                    "✅ Електропостачання відновлено\n"
-                    f"🕐 Час: {kyiv_time}\n\n"
-                    "🏠 Можна користуватись побутовими приладами"
-                )
+                message = PowerStatusFormatter.format_power_on_message(timestamp)
             else:
-                # Power is out
-                message = (
-                    "🔴 <b>Світло зникло</b> 🔴\n\n"
-                    "❌ Електропостачання відсутнє\n"
-                    f"🕐 Час: {kyiv_time}"
-                )
+                message = PowerStatusFormatter.format_power_off_message(timestamp)
 
-            # Use event loop to send message
             loop = get_or_create_eventloop()
             loop.run_until_complete(telegram_bot.send_message(message))
             notification_sent = True
