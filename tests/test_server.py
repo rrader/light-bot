@@ -5,8 +5,7 @@ import tempfile
 import sys
 from unittest.mock import patch, Mock, AsyncMock
 
-# Add parent directory to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 
 @pytest.fixture
@@ -24,11 +23,11 @@ def temp_power_file():
 @pytest.fixture
 def client():
     """Create Flask test client"""
-    with patch('server.telegram_bot') as mock_bot:
+    with patch('light_bot.core.server.telegram_bot') as mock_bot:
         # Mock the bot's send_message method
         mock_bot.send_message = AsyncMock(return_value=True)
 
-        from server import app
+        from light_bot.core.server import app
         app.config['TESTING'] = True
 
         with app.test_client() as client:
@@ -95,8 +94,8 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_success_on(self, client, temp_power_file):
         """Test successful power on update"""
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
-             patch('server.asyncio.run') as mock_run:
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
                                    headers={'Authorization': 'test_api_token_123'},
@@ -114,8 +113,8 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_success_off(self, client, temp_power_file):
         """Test successful power off update"""
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
-             patch('server.asyncio.run') as mock_run:
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
                                    headers={'Authorization': 'test_api_token_123'},
@@ -128,8 +127,8 @@ class TestPowerStatusEndpoint:
 
     def test_update_power_status_bearer_token(self, client, temp_power_file):
         """Test authentication with Bearer token prefix"""
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file), \
-             patch('server.asyncio.run') as mock_run:
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.asyncio.run') as mock_run:
 
             response = client.post('/power-status',
                                    headers={'Authorization': 'Bearer test_api_token_123'},
@@ -150,7 +149,7 @@ class TestPowerStatusEndpoint:
             f.write("on\n")
             f.write("Last updated: 2025-10-25T12:00:00\n")
 
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file):
             response = client.get('/power-status',
                                   headers={'Authorization': 'test_api_token_123'})
 
@@ -161,7 +160,7 @@ class TestPowerStatusEndpoint:
 
     def test_get_power_status_no_file(self, client):
         """Test status retrieval when file doesn't exist"""
-        with patch('server.WATCHDOG_STATUS_FILE', '/nonexistent/file.txt'):
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', '/nonexistent/file.txt'):
             response = client.get('/power-status',
                                   headers={'Authorization': 'test_api_token_123'})
 
@@ -197,9 +196,9 @@ class TestFileOperations:
 
     def test_write_power_status_creates_file(self, temp_power_file):
         """Test that write_power_status creates file with correct format"""
-        from server import write_power_status
+        from light_bot.core.server import write_power_status
 
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file):
             result = write_power_status('on')
 
             assert result is True
@@ -213,14 +212,14 @@ class TestFileOperations:
 
     def test_read_power_status_from_file(self, temp_power_file):
         """Test reading power status from file"""
-        from server import read_power_status
+        from light_bot.core.server import read_power_status
 
         # Write test data
         with open(temp_power_file, 'w') as f:
             f.write("off\n")
             f.write("Last updated: 2025-10-25T12:00:00\n")
 
-        with patch('server.WATCHDOG_STATUS_FILE', temp_power_file):
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file):
             status = read_power_status()
 
             assert status['status'] == 'off'

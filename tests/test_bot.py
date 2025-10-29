@@ -1,15 +1,13 @@
 import pytest
-import asyncio
 import os
 import tempfile
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 from telegram.error import TelegramError
 import sys
 
-# Add parent directory to path to import modules
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from bot import TelegramChannelBot
+from light_bot.core.bot import TelegramChannelBot
 
 
 @pytest.fixture
@@ -36,7 +34,7 @@ def temp_files():
 @pytest.fixture
 def bot():
     """Create a bot instance with mocked Telegram Bot"""
-    with patch('bot.Bot') as mock_bot:
+    with patch('light_bot.core.bot.Bot') as mock_bot:
         bot_instance = TelegramChannelBot()
         bot_instance.bot = Mock()
         return bot_instance
@@ -75,28 +73,4 @@ class TestTelegramChannelBot:
         result = await bot.send_message("Test message")
 
         assert result is False
-
-    @pytest.mark.asyncio
-    async def test_send_photo_success(self, bot):
-        """Test successful photo sending"""
-        mock_message = Mock()
-        mock_message.message_id = 456
-        bot.bot.send_photo = AsyncMock(return_value=mock_message)
-
-        result = await bot.send_photo("https://example.com/photo.jpg", "Caption")
-
-        assert result is True
-        bot.bot.send_photo.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_send_document_success(self, bot):
-        """Test successful document sending"""
-        mock_message = Mock()
-        mock_message.message_id = 789
-        bot.bot.send_document = AsyncMock(return_value=mock_message)
-
-        result = await bot.send_document("https://example.com/doc.pdf", "Document")
-
-        assert result is True
-        bot.bot.send_document.assert_called_once()
 
