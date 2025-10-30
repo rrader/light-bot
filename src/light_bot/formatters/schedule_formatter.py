@@ -60,6 +60,18 @@ class ScheduleFormatter:
         weekday_names = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя']
         weekday = weekday_names[day_schedule.date.weekday()]
 
+        # Handle emergency shutdowns
+        if day_schedule.status == "EmergencyShutdowns":
+            message = (
+                f"🚨 <b>ЕКСТРЕНІ ВІДКЛЮЧЕННЯ</b> 🚨\n\n"
+                f"🏠 Група: <b>{group}</b>\n"
+                f"📅 {weekday}, {date_str}\n\n"
+                f"⚠️ <b>Графіки не застосовуються</b>\n"
+                f"Екстрені відключення через аварійні ситуації\n\n"
+                f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+            )
+            return message
+
         outages_text = ScheduleFormatter.format_outage_slots(day_schedule.slots)
 
         status_msg = ""

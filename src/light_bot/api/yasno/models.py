@@ -20,6 +20,7 @@ class ScheduleStatus(str, Enum):
     SCHEDULE_APPLIES = "ScheduleApplies"
     WAITING_FOR_SCHEDULE = "WaitingForSchedule"
     NO_OUTAGES = "NoOutages"
+    EMERGENCY_SHUTDOWNS = "EmergencyShutdowns"
 
 
 class PowerSlot(BaseModel):
