@@ -2,6 +2,7 @@
 
 import logging
 import requests
+import os
 
 from .models import YasnoScheduleResponse
 
@@ -16,8 +17,26 @@ class YasnoAPIClient:
     with today/tomorrow schedules for all power groups.
     """
 
-    # Region 25 = Kiev, DSO 902 = DTEK Kyiv Energy
-    _api_url = "https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages"
+    def __init__(self, base_url=None):
+        """
+        Initialize Yasno API client
+
+        Args:
+            base_url: Custom base URL (for E2E testing with mock server)
+        """
+        # Use custom base URL if provided (from config or parameter)
+        self.base_url = base_url or os.getenv('YASNO_API_BASE_URL')
+
+        # Region 25 = Kiev, DSO 902 = DTEK Kyiv Energy
+        api_path = "/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages"
+
+        if self.base_url:
+            # E2E testing with mock server (same API path)
+            self._api_url = f"{self.base_url}{api_path}"
+            _LOGGER.info(f"Using custom Yasno API URL: {self._api_url}")
+        else:
+            # Production API
+            self._api_url = f"https://app.yasno.ua{api_path}"
 
     def update(self, force=False) -> YasnoScheduleResponse | None:
         """Fetch current power outage schedule from API"""
@@ -29,7 +48,7 @@ class YasnoAPIClient:
                 return None
 
             resp_json = resp.json()
-            _LOGGER.debug(f"API response received with {len(resp_json)} groups")
+            _LOGGER.debug(f"API response received")
 
             # Parse response using custom model
             schedule = YasnoScheduleResponse(resp_json)

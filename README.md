@@ -426,34 +426,46 @@ journalctl -u light-bot-monitor -f
 
 ## Testing
 
-The project includes a comprehensive test suite with 29 tests covering both the bot and server functionality.
+The project includes a comprehensive test suite with **53 tests** covering:
+- Duration tracking with Ukrainian formatting
+- Power status API endpoints
+- Yasno schedule integration
+- End-to-end workflows including real monitor.sh execution
 
-### Running Tests
-
-1. Create and activate virtual environment:
+### Quick Start - Run All Tests ⭐
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+# Single command to run everything (recommended)
+make test-all
 ```
 
-2. Install dependencies:
+This runs all 52 Python tests + monitor.sh integration test (~20 seconds).
+
+### Individual Test Commands
 
 ```bash
-pip install -r requirements.txt
+make test              # All Python tests (52 tests)
+make test-unit         # Unit tests only (13 tests)
+make test-integration  # Integration tests (27 tests)
+make test-e2e          # E2E Python tests (12 tests)
+make test-monitor      # monitor.sh integration (real script execution)
+make clean             # Clean test artifacts
+make help              # Show all available commands
 ```
 
-3. Run all tests:
+### Manual Test Execution
 
 ```bash
+# Run all Python tests
 pytest tests/ -v
-```
 
-4. Run specific test file:
-
-```bash
+# Run specific test file
 pytest tests/test_bot.py -v
 pytest tests/test_server.py -v
+pytest tests/e2e/test_power_monitoring.py -v
+
+# Run monitor.sh integration test
+./tests/e2e/test_with_monitor.sh
 ```
 
 5. Run with coverage report:

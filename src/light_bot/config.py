@@ -9,6 +9,8 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_SCHEDULE_CHANNEL_ID = os.getenv('TELEGRAM_SCHEDULE_CHANNEL_ID', TELEGRAM_CHANNEL_ID)
+# For E2E testing with mock server (None in production = use official Telegram API)
+TELEGRAM_API_BASE_URL = os.getenv('TELEGRAM_API_BASE_URL')
 
 # Flask Configuration
 FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
@@ -24,7 +26,10 @@ TOMORROW_SENT_DATE_FILE = os.getenv('TOMORROW_SENT_DATE_FILE', 'tomorrow_sent_da
 TIMEZONE = pytz.timezone(os.getenv('TIMEZONE', 'Europe/Kyiv'))
 
 # Yasno Schedule Configuration (Kiev region only)
+# For E2E testing with mock server (None in production = use official Yasno API)
+YASNO_API_BASE_URL = os.getenv('YASNO_API_BASE_URL')
 YASNO_GROUP = os.getenv('YASNO_GROUP', '2.1')
+YASNO_CITY = os.getenv('YASNO_CITY', 'kiev')
 SCHEDULE_CHECK_INTERVAL = int(os.getenv('SCHEDULE_CHECK_INTERVAL', 3600))  # Check every hour
 SCHEDULE_EVENING_HOUR = int(os.getenv('SCHEDULE_EVENING_HOUR', 20))  # 20:00 / 8 PM
 SCHEDULE_EVENING_MINUTE = int(os.getenv('SCHEDULE_EVENING_MINUTE', 0))
