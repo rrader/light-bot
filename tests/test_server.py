@@ -251,3 +251,194 @@ class TestErrorHandling:
                                data='{}')
 
         assert response.status_code == 400
+
+
+class TestDurationTracking:
+    """Test duration tracking in power status updates"""
+
+    def test_duration_calculated_on_status_change(self, client, temp_power_file):
+        """Test that duration is calculated when status changes"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Write initial state (power was off 2 hours ago)
+        two_hours_ago = datetime.now(TIMEZONE) - timedelta(hours=2)
+        with open(temp_power_file, 'w') as f:
+            f.write("off\n")
+            f.write(f"Last updated: {two_hours_ago.isoformat()}\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            assert response.status_code == 200
+            assert response.json['status_changed'] is True
+            assert response.json['notification_sent'] is True
+
+            # Verify send_message was called
+            assert mock_bot.send_message.called
+
+            # Verify the message contains duration information
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            assert 'Відключення тривало' in message
+            assert 'години' in message or 'годин' in message
+
+    def test_no_duration_on_first_update(self, client, temp_power_file):
+        """Test that first update has no duration"""
+        # Remove file to simulate first update
+        if os.path.exists(temp_power_file):
+            os.unlink(temp_power_file)
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            assert response.status_code == 200
+
+            # Verify send_message was called
+            assert mock_bot.send_message.called
+
+            # Message should not contain duration
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            assert 'Відключення тривало' not in message
+
+    def test_duration_with_naive_timestamp(self, client, temp_power_file):
+        """Test handling of timezone-naive timestamp"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Write timestamp without timezone info (naive datetime)
+        one_hour_ago = datetime.now(TIMEZONE) - timedelta(hours=1)
+        naive_timestamp = one_hour_ago.replace(tzinfo=None)
+
+        with open(temp_power_file, 'w') as f:
+            f.write("off\n")
+            f.write(f"Last updated: {naive_timestamp.isoformat()}\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            # Should succeed despite naive timestamp
+            assert response.status_code == 200
+
+    def test_duration_with_short_interval(self, client, temp_power_file):
+        """Test duration display for very short intervals (seconds/minutes)"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Power was off just 45 seconds ago
+        forty_five_seconds_ago = datetime.now(TIMEZONE) - timedelta(seconds=45)
+
+        with open(temp_power_file, 'w') as f:
+            f.write("off\n")
+            f.write(f"Last updated: {forty_five_seconds_ago.isoformat()}\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            assert response.status_code == 200
+
+            # Verify message contains seconds
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            assert 'секунд' in message
+
+    def test_no_duration_on_unchanged_status(self, client, temp_power_file):
+        """Test that no notification sent when status doesn't change"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Write initial state (power is already on)
+        one_hour_ago = datetime.now(TIMEZONE) - timedelta(hours=1)
+
+        with open(temp_power_file, 'w') as f:
+            f.write("on\n")
+            f.write(f"Last updated: {one_hour_ago.isoformat()}\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            # Try to set status to 'on' again
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            assert response.status_code == 200
+            assert response.json['status_changed'] is False
+            assert response.json['notification_sent'] is False
+
+            # Verify send_message was NOT called
+            assert not mock_bot.send_message.called
+
+    def test_duration_with_unparseable_timestamp(self, client, temp_power_file):
+        """Test handling of unparseable/invalid timestamp"""
+        # Write status file with invalid timestamp
+        with open(temp_power_file, 'w') as f:
+            f.write("off\n")
+            f.write("Last updated: Unknown\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            # Should succeed without crashing
+            assert response.status_code == 200
+            assert response.json['status_changed'] is True
+
+            # Verify send_message was called (but without duration)
+            assert mock_bot.send_message.called
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            # Should not contain duration since timestamp was unparseable
+            assert 'Відключення тривало' not in message
+
+    def test_duration_with_corrupted_file(self, client, temp_power_file):
+        """Test handling of corrupted status file (missing timestamp line)"""
+        # Write status file with only status, no timestamp line
+        with open(temp_power_file, 'w') as f:
+            f.write("off\n")
+            # No timestamp line
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            # Should succeed without crashing
+            assert response.status_code == 200
+            assert response.json['status_changed'] is True

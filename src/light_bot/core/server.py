@@ -6,6 +6,7 @@ from functools import wraps
 from flask import Flask, request, jsonify
 from light_bot.core.bot import telegram_bot
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
+from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -62,20 +63,33 @@ def write_power_status(status: str):
 
 
 def read_power_status():
-    """Read current power status from file"""
+    """Read current power status from file with parsed timestamp"""
     try:
         if os.path.exists(WATCHDOG_STATUS_FILE):
             with open(WATCHDOG_STATUS_FILE, 'r') as f:
                 lines = f.readlines()
                 if lines:
+                    status = lines[0].strip()
+                    timestamp_line = lines[1].strip() if len(lines) > 1 else 'Unknown'
+
+                    # Parse timestamp if available
+                    timestamp_obj = None
+                    if timestamp_line.startswith('Last updated: '):
+                        try:
+                            timestamp_str = timestamp_line.replace('Last updated: ', '')
+                            timestamp_obj = datetime.fromisoformat(timestamp_str)
+                        except (ValueError, AttributeError) as e:
+                            logger.warning(f"Could not parse timestamp: {e}")
+
                     return {
-                        'status': lines[0].strip(),
-                        'last_updated': lines[1].strip() if len(lines) > 1 else 'Unknown'
+                        'status': status,
+                        'last_updated': timestamp_line,
+                        'timestamp': timestamp_obj
                     }
-        return {'status': 'Unknown', 'last_updated': 'Never'}
+        return {'status': 'Unknown', 'last_updated': 'Never', 'timestamp': None}
     except Exception as e:
         logger.error(f"Error reading power status from file: {e}")
-        return {'status': 'Error', 'last_updated': str(e)}
+        return {'status': 'Error', 'last_updated': str(e), 'timestamp': None}
 
 
 @app.route('/health', methods=['GET'])
@@ -114,6 +128,38 @@ def update_power_status():
         current_status = read_power_status()
         status_changed = current_status.get('status', '').lower() != status if current_status else True
 
+        # Calculate duration if we have a previous timestamp
+        duration_text = None
+        if status_changed and current_status.get('timestamp'):
+            try:
+                current_timestamp = datetime.now(TIMEZONE)
+                previous_timestamp = current_status['timestamp']
+
+                # Ensure both timestamps are timezone-aware
+                if previous_timestamp.tzinfo is None:
+                    # Timestamp is naive, assume it's in our configured timezone
+                    previous_timestamp = TIMEZONE.localize(previous_timestamp)
+                elif previous_timestamp.tzinfo != current_timestamp.tzinfo:
+                    # Different timezone, convert to our configured timezone
+                    previous_timestamp = previous_timestamp.astimezone(TIMEZONE)
+
+                duration = current_timestamp - previous_timestamp
+
+                # Ignore negative durations (clock skew/system time changes)
+                if duration.total_seconds() < 0:
+                    logger.warning(f"Negative duration detected ({duration.total_seconds()}s), skipping duration display")
+                    duration_text = None
+                else:
+                    duration_text = DurationFormatter.format_duration(duration)
+                    logger.info(f"Duration calculated: {duration_text}")
+
+            except (TypeError, ValueError) as e:
+                logger.error(f"Error calculating duration (timestamp issue): {e}")
+                duration_text = None
+            except Exception as e:
+                logger.error(f"Unexpected error calculating duration: {e}", exc_info=True)
+                duration_text = None
+
         # Write status to file
         if not write_power_status(status):
             return jsonify({'error': 'Failed to write status to file'}), 500
@@ -124,9 +170,9 @@ def update_power_status():
             timestamp = datetime.now(TIMEZONE)
 
             if status == 'on':
-                message = PowerStatusFormatter.format_power_on_message(timestamp)
+                message = PowerStatusFormatter.format_power_on_message(timestamp, duration_text)
             else:
-                message = PowerStatusFormatter.format_power_off_message(timestamp)
+                message = PowerStatusFormatter.format_power_off_message(timestamp, duration_text)
 
             loop = get_or_create_eventloop()
             loop.run_until_complete(telegram_bot.send_message(message))
