@@ -128,7 +128,7 @@ def update_power_status():
         current_status = read_power_status()
         status_changed = current_status.get('status', '').lower() != status if current_status else True
 
-        # Calculate duration if we have a previous timestamp
+        # Calculate duration if we have a previous timestamp AND status changed
         duration_text = None
         if status_changed and current_status.get('timestamp'):
             try:
@@ -160,9 +160,10 @@ def update_power_status():
                 logger.error(f"Unexpected error calculating duration: {e}", exc_info=True)
                 duration_text = None
 
-        # Write status to file
-        if not write_power_status(status):
-            return jsonify({'error': 'Failed to write status to file'}), 500
+        # Only write status to file if status changed (to preserve timestamp)
+        if status_changed:
+            if not write_power_status(status):
+                return jsonify({'error': 'Failed to write status to file'}), 500
 
         # Only send notification if status changed
         notification_sent = False
