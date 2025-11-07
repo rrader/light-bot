@@ -57,7 +57,12 @@ cd "$PROJECT_DIR"
 log "Step 1: Starting simple mock server..."
 
 # Start minimal mock server (no Telegram/Yasno dependencies)
-python "$SCRIPT_DIR/simple_mock_server.py" > /tmp/e2e_server.log 2>&1 &
+# Use virtualenv Python if available
+if [ -f "$PROJECT_DIR/venv/bin/python" ]; then
+    "$PROJECT_DIR/venv/bin/python" "$SCRIPT_DIR/simple_mock_server.py" > /tmp/e2e_server.log 2>&1 &
+else
+    python "$SCRIPT_DIR/simple_mock_server.py" > /tmp/e2e_server.log 2>&1 &
+fi
 SERVER_PID=$!
 
 log "Server PID: $SERVER_PID"

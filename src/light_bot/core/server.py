@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import wraps
 from flask import Flask, request, jsonify
 from light_bot.core.bot import telegram_bot
+from light_bot.core.file_utils import atomic_write_text, read_text
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE
@@ -52,9 +53,8 @@ def write_power_status(status: str):
     """Write power status to file with timestamp in Kyiv timezone"""
     try:
         timestamp = datetime.now(TIMEZONE).isoformat()
-        with open(WATCHDOG_STATUS_FILE, 'w') as f:
-            f.write(f"{status}\n")
-            f.write(f"Last updated: {timestamp}\n")
+        content = f"{status}\nLast updated: {timestamp}\n"
+        atomic_write_text(WATCHDOG_STATUS_FILE, content)
         logger.info(f"Power status written to file: {status}")
         return True
     except Exception as e:
@@ -65,27 +65,27 @@ def write_power_status(status: str):
 def read_power_status():
     """Read current power status from file with parsed timestamp"""
     try:
-        if os.path.exists(WATCHDOG_STATUS_FILE):
-            with open(WATCHDOG_STATUS_FILE, 'r') as f:
-                lines = f.readlines()
-                if lines:
-                    status = lines[0].strip()
-                    timestamp_line = lines[1].strip() if len(lines) > 1 else 'Unknown'
+        content = read_text(WATCHDOG_STATUS_FILE)
+        if content:
+            lines = content.split('\n')
+            if lines:
+                status = lines[0].strip()
+                timestamp_line = lines[1].strip() if len(lines) > 1 else 'Unknown'
 
-                    # Parse timestamp if available
-                    timestamp_obj = None
-                    if timestamp_line.startswith('Last updated: '):
-                        try:
-                            timestamp_str = timestamp_line.replace('Last updated: ', '')
-                            timestamp_obj = datetime.fromisoformat(timestamp_str)
-                        except (ValueError, AttributeError) as e:
-                            logger.warning(f"Could not parse timestamp: {e}")
+                # Parse timestamp if available
+                timestamp_obj = None
+                if timestamp_line.startswith('Last updated: '):
+                    try:
+                        timestamp_str = timestamp_line.replace('Last updated: ', '')
+                        timestamp_obj = datetime.fromisoformat(timestamp_str)
+                    except (ValueError, AttributeError) as e:
+                        logger.warning(f"Could not parse timestamp: {e}")
 
-                    return {
-                        'status': status,
-                        'last_updated': timestamp_line,
-                        'timestamp': timestamp_obj
-                    }
+                return {
+                    'status': status,
+                    'last_updated': timestamp_line,
+                    'timestamp': timestamp_obj
+                }
         return {'status': 'Unknown', 'last_updated': 'Never', 'timestamp': None}
     except Exception as e:
         logger.error(f"Error reading power status from file: {e}")

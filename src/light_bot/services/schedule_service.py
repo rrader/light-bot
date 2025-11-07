@@ -9,15 +9,19 @@ from telegram.error import TelegramError
 
 from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
+from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
     TIMEZONE,
     YASNO_GROUP,
     SCHEDULE_CHECK_INTERVAL,
-    SCHEDULE_CHANGES_START_HOUR,
+    SCHEDULE_TODAY_START_HOUR,
+    SCHEDULE_TODAY_END_HOUR,
     SCHEDULE_TOMORROW_START_HOUR,
-    LAST_SCHEDULE_HASH_FILE,
+    SCHEDULE_TOMORROW_END_HOUR,
+    LAST_SCHEDULE_TODAY_HASH_FILE,
+    LAST_SCHEDULE_TOMORROW_HASH_FILE,
     LAST_CHECK_DATE_FILE,
     TOMORROW_SENT_DATE_FILE,
 )
@@ -34,70 +38,61 @@ class ScheduleService:
         self.group = YASNO_GROUP
         self.formatter = ScheduleFormatter()
         self.monitoring = False
-        self.last_schedule_hash = self._read_last_hash()
+        self.last_today_hash = self._read_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE)
+        self.last_tomorrow_hash = self._read_hash_file(LAST_SCHEDULE_TOMORROW_HASH_FILE)
         self.last_check_date = self._read_last_check_date()
         self.tomorrow_sent_date = self._read_tomorrow_sent_date()
 
-    def _read_last_hash(self) -> Optional[str]:
-        """Read last schedule hash from file"""
-        try:
-            if os.path.exists(LAST_SCHEDULE_HASH_FILE):
-                with open(LAST_SCHEDULE_HASH_FILE, 'r') as f:
-                    return f.read().strip()
-        except Exception as e:
-            logger.error(f"Error reading schedule hash file: {e}")
-        return None
+    def _read_hash_file(self, file_path: str) -> Optional[str]:
+        """Read schedule hash from file"""
+        return read_text(file_path)
 
-    def _write_last_hash(self, hash_value: str) -> None:
-        """Write last schedule hash to file"""
+    def _write_hash_file(self, file_path: str, hash_value: str) -> None:
+        """Write schedule hash to file atomically"""
         try:
-            with open(LAST_SCHEDULE_HASH_FILE, 'w') as f:
-                f.write(hash_value)
-            logger.info(f"Schedule hash saved: {hash_value[:8]}...")
+            atomic_write_text(file_path, hash_value)
+            logger.info(f"Hash saved to {file_path}: {hash_value[:8]}...")
         except Exception as e:
-            logger.error(f"Error writing schedule hash file: {e}")
+            logger.error(f"Error writing hash file {file_path}: {e}")
+            raise
 
     def _read_last_check_date(self) -> Optional[datetime]:
         """Read last check date from file"""
         try:
-            if os.path.exists(LAST_CHECK_DATE_FILE):
-                with open(LAST_CHECK_DATE_FILE, 'r') as f:
-                    date_str = f.read().strip()
-                    if date_str:
-                        return datetime.strptime(date_str, '%Y-%m-%d').date()
+            date_str = read_text(LAST_CHECK_DATE_FILE)
+            if date_str:
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
         except Exception as e:
-            logger.error(f"Error reading last check date file: {e}")
+            logger.error(f"Error parsing last check date: {e}")
         return None
 
     def _write_last_check_date(self, date_value: datetime) -> None:
-        """Write last check date to file"""
+        """Write last check date to file atomically"""
         try:
-            with open(LAST_CHECK_DATE_FILE, 'w') as f:
-                f.write(date_value.strftime('%Y-%m-%d'))
+            atomic_write_text(LAST_CHECK_DATE_FILE, date_value.strftime('%Y-%m-%d'))
             logger.debug(f"Last check date saved: {date_value}")
         except Exception as e:
             logger.error(f"Error writing last check date file: {e}")
+            raise
 
     def _read_tomorrow_sent_date(self) -> Optional[datetime]:
         """Read tomorrow sent date from file"""
         try:
-            if os.path.exists(TOMORROW_SENT_DATE_FILE):
-                with open(TOMORROW_SENT_DATE_FILE, 'r') as f:
-                    date_str = f.read().strip()
-                    if date_str:
-                        return datetime.strptime(date_str, '%Y-%m-%d').date()
+            date_str = read_text(TOMORROW_SENT_DATE_FILE)
+            if date_str:
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
         except Exception as e:
-            logger.error(f"Error reading tomorrow sent date file: {e}")
+            logger.error(f"Error parsing tomorrow sent date: {e}")
         return None
 
     def _write_tomorrow_sent_date(self, date_value: datetime) -> None:
-        """Write tomorrow sent date to file"""
+        """Write tomorrow sent date to file atomically"""
         try:
-            with open(TOMORROW_SENT_DATE_FILE, 'w') as f:
-                f.write(date_value.strftime('%Y-%m-%d'))
+            atomic_write_text(TOMORROW_SENT_DATE_FILE, date_value.strftime('%Y-%m-%d'))
             logger.info(f"Tomorrow sent date saved: {date_value}")
         except Exception as e:
             logger.error(f"Error writing tomorrow sent date file: {e}")
+            raise
 
     def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[str]:
         """Compute hash of schedule to detect changes (date-independent)"""
@@ -167,27 +162,62 @@ class ScheduleService:
             logger.error(f"Error sending schedule: {e}")
             return False
 
+    def _perform_midnight_rollover(self) -> None:
+        """Perform midnight rollover: delete today's hash, promote tomorrow's hash to today's
+
+        This method performs atomic file operations to ensure consistency.
+        If any critical operation fails, an exception is raised to prevent
+        inconsistent state.
+
+        Raises:
+            OSError: If critical file operations fail
+        """
+        try:
+            # Step 1: Delete today's hash file (yesterday is gone)
+            safe_remove(LAST_SCHEDULE_TODAY_HASH_FILE, critical=True)
+            logger.info("Deleted today's hash file (yesterday)")
+
+            # Step 2: Promote tomorrow's hash to today's hash
+            if os.path.exists(LAST_SCHEDULE_TOMORROW_HASH_FILE):
+                safe_rename(LAST_SCHEDULE_TOMORROW_HASH_FILE, LAST_SCHEDULE_TODAY_HASH_FILE)
+                logger.info("Promoted tomorrow's hash to today's hash")
+
+                # Update in-memory reference ONLY after successful file operation
+                self.last_today_hash = self._read_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE)
+                self.last_tomorrow_hash = None
+            else:
+                logger.info("No tomorrow hash to promote")
+                self.last_today_hash = None
+                self.last_tomorrow_hash = None
+
+            # Step 3: Clear tomorrow_sent_date (ready to send new tomorrow)
+            safe_remove(TOMORROW_SENT_DATE_FILE, critical=False)
+            logger.info("Cleared tomorrow sent date")
+            self.tomorrow_sent_date = None
+
+            logger.info("Midnight rollover completed successfully")
+        except OSError:
+            logger.critical("Critical error during midnight rollover - stopping monitoring")
+            raise  # Re-raise to stop monitoring loop
+        except Exception as e:
+            logger.error(f"Unexpected error during midnight rollover: {e}")
+            raise
+
     async def check_tomorrow_schedule(self) -> None:
         """Check if tomorrow's schedule is available and ready (not WaitingForSchedule)"""
         try:
             current_date = datetime.now(TIMEZONE).date()
+            current_hour = datetime.now(TIMEZONE).hour
+
+            # Check if we're within the monitoring window
+            if current_hour < SCHEDULE_TOMORROW_START_HOUR or current_hour > SCHEDULE_TOMORROW_END_HOUR:
+                logger.debug(f"Outside tomorrow monitoring window (current: {current_hour}h, window: {SCHEDULE_TOMORROW_START_HOUR}-{SCHEDULE_TOMORROW_END_HOUR}h)")
+                return
 
             # Check if we already sent tomorrow's schedule today
             if self.tomorrow_sent_date == current_date:
                 logger.debug("Tomorrow's schedule already sent today")
                 return
-
-            # Check if it's time to start checking (after SCHEDULE_TOMORROW_START_HOUR)
-            current_hour = datetime.now(TIMEZONE).hour
-            if current_hour < SCHEDULE_TOMORROW_START_HOUR:
-                logger.debug(f"Too early to check tomorrow's schedule (current: {current_hour}h, start: {SCHEDULE_TOMORROW_START_HOUR}h)")
-                return
-
-            # Delete hash file before checking - if schedule doesn't appear, morning will send it
-            if os.path.exists(LAST_SCHEDULE_HASH_FILE):
-                os.remove(LAST_SCHEDULE_HASH_FILE)
-                logger.info("Deleted hash file before checking tomorrow's schedule")
-            self.last_schedule_hash = None
 
             logger.info("Checking if tomorrow's schedule is ready...")
             schedule_data = yasno_client.update()
@@ -202,44 +232,51 @@ class ScheduleService:
                 return
 
             tomorrow_schedule = group_schedule.tomorrow
+            tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
+
+            if not tomorrow_hash:
+                logger.warning("Could not compute tomorrow's schedule hash")
+                return
+
+            # Check if schedule has changed (or is new)
+            if self.last_tomorrow_hash and tomorrow_hash == self.last_tomorrow_hash:
+                logger.debug("Tomorrow's schedule unchanged")
+                return
 
             # Check if tomorrow's schedule is confirmed (not waiting)
             if tomorrow_schedule.status != "WaitingForSchedule":
                 logger.info(f"Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
 
                 # Send tomorrow's schedule
-                await self.send_schedule(for_tomorrow=True)
+                change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
+                await self.send_schedule(for_tomorrow=True, change_detected=change_detected)
 
-                # Save hash with tomorrow's schedule so morning doesn't duplicate
-                tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
-                if tomorrow_hash:
-                    self.last_schedule_hash = tomorrow_hash
-                    self._write_last_hash(tomorrow_hash)
-                    logger.info(f"Saved hash with tomorrow's schedule: {tomorrow_hash[:8]}... - morning won't duplicate")
+                # Save tomorrow's hash
+                self.last_tomorrow_hash = tomorrow_hash
+                self._write_hash_file(LAST_SCHEDULE_TOMORROW_HASH_FILE, tomorrow_hash)
+                logger.info(f"Saved tomorrow's hash: {tomorrow_hash[:8]}...")
 
                 # Mark that we sent tomorrow's schedule today
                 self.tomorrow_sent_date = current_date
                 self._write_tomorrow_sent_date(current_date)
                 logger.info(f"Tomorrow's schedule sent and marked for date: {current_date}")
             else:
-                logger.info(f"Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status}), hash remains deleted")
+                logger.debug(f"Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
 
         except Exception as e:
             logger.error(f"Error checking tomorrow's schedule: {e}")
 
-    async def check_schedule_changes(self):
-        """Check if schedule has changed and notify if it has"""
+    async def check_today_schedule(self):
+        """Check if today's schedule has changed and notify if it has"""
         try:
-            # Check if it's within the allowed time window (SCHEDULE_CHANGES_START_HOUR to SCHEDULE_TOMORROW_START_HOUR)
             current_hour = datetime.now(TIMEZONE).hour
-            if current_hour < SCHEDULE_CHANGES_START_HOUR:
-                logger.debug(f"Too early to check schedule changes (current: {current_hour}h, start: {SCHEDULE_CHANGES_START_HOUR}h)")
-                return
-            if current_hour >= SCHEDULE_TOMORROW_START_HOUR:
-                logger.debug(f"Too late to check schedule changes (current: {current_hour}h, stop: {SCHEDULE_TOMORROW_START_HOUR}h)")
+
+            # Check if we're within the monitoring window
+            if current_hour < SCHEDULE_TODAY_START_HOUR or current_hour > SCHEDULE_TODAY_END_HOUR:
+                logger.debug(f"Outside today monitoring window (current: {current_hour}h, window: {SCHEDULE_TODAY_START_HOUR}-{SCHEDULE_TODAY_END_HOUR}h)")
                 return
 
-            logger.info("Checking for schedule changes...")
+            logger.info("Checking for today's schedule changes...")
             schedule_data = yasno_client.update()
 
             if not schedule_data:
@@ -248,51 +285,36 @@ class ScheduleService:
 
             current_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=False)
             if not current_hash:
-                logger.warning("Could not compute schedule hash")
+                logger.warning("Could not compute today's schedule hash")
                 return
 
-            # Get current date
-            current_date = datetime.now(TIMEZONE).date()
-
-            # Detect if this is a new day
-            is_new_day = self.last_check_date is not None and current_date != self.last_check_date
-
             # Compare with last known hash
-            if not self.last_schedule_hash:
-                # No hash file exists - send today's schedule
-                logger.info("No hash file found - sending today's schedule")
+            if not self.last_today_hash:
+                # No hash file exists - send today's schedule (morning case)
+                logger.info("No today hash found - sending today's schedule")
                 await self.send_schedule(for_tomorrow=False, change_detected=False)
-                self.last_schedule_hash = current_hash
-                self._write_last_hash(current_hash)
-            elif current_hash != self.last_schedule_hash:
-                logger.info(f"Schedule changed! Old: {self.last_schedule_hash[:8]}, New: {current_hash[:8]}")
+                self.last_today_hash = current_hash
+                self._write_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE, current_hash)
+            elif current_hash != self.last_today_hash:
+                logger.info(f"Today's schedule changed! Old: {self.last_today_hash[:8]}, New: {current_hash[:8]}")
 
-                # If it's a new day but hash is different, it means actual schedule change
-                # (not just yesterday's schedule that we already announced)
-                if is_new_day:
-                    logger.info("New day with different schedule - sending today's schedule")
-                else:
-                    logger.info("Schedule changed within the same day")
-
-                # Send updated schedule (mark as changed only if not a new day)
-                await self.send_schedule(for_tomorrow=False, change_detected=not is_new_day)
+                # Send updated schedule with change flag
+                await self.send_schedule(for_tomorrow=False, change_detected=True)
 
                 # Update stored hash
-                self.last_schedule_hash = current_hash
-                self._write_last_hash(current_hash)
+                self.last_today_hash = current_hash
+                self._write_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE, current_hash)
             else:
-                logger.info("Schedule unchanged")
-
-            # Update the last check date
-            self.last_check_date = current_date
-            self._write_last_check_date(current_date)
+                logger.debug("Today's schedule unchanged")
 
         except Exception as e:
-            logger.error(f"Error checking schedule changes: {e}")
+            logger.error(f"Error checking today's schedule: {e}")
 
     async def schedule_monitoring_loop(self):
         """Main monitoring loop for scheduled messages and change detection"""
         logger.info(f"Starting schedule monitoring (check interval: {SCHEDULE_CHECK_INTERVAL}s)")
+        logger.info(f"Today monitoring window: {SCHEDULE_TODAY_START_HOUR}-{SCHEDULE_TODAY_END_HOUR}h")
+        logger.info(f"Tomorrow monitoring window: {SCHEDULE_TOMORROW_START_HOUR}-{SCHEDULE_TOMORROW_END_HOUR}h")
         self.monitoring = True
 
         while self.monitoring:
@@ -300,19 +322,39 @@ class ScheduleService:
                 now = datetime.now(TIMEZONE)
                 current_date = now.date()
 
-                # Check if tomorrow's schedule is ready (starts at SCHEDULE_TOMORROW_START_HOUR)
-                # This will automatically send when status != "WaitingForSchedule"
-                await self.check_tomorrow_schedule()
+                # Check if it's a new day - perform midnight rollover
+                if self.last_check_date is not None and current_date != self.last_check_date:
+                    logger.info(f"New day detected! {self.last_check_date} -> {current_date}")
+                    try:
+                        self._perform_midnight_rollover()
+                    except OSError as e:
+                        logger.critical(f"Critical: Midnight rollover failed, stopping monitoring: {e}")
+                        self.monitoring = False
+                        raise
 
-                # Check for schedule changes (every SCHEDULE_CHECK_INTERVAL)
-                await self.check_schedule_changes()
+                # Check today's schedule for changes (independent monitoring)
+                try:
+                    await self.check_today_schedule()
+                except Exception as e:
+                    logger.error(f"Error checking today's schedule (will retry): {e}")
+
+                # Check tomorrow's schedule (independent monitoring)
+                try:
+                    await self.check_tomorrow_schedule()
+                except Exception as e:
+                    logger.error(f"Error checking tomorrow's schedule (will retry): {e}")
+
+                # Update the last check date
+                self.last_check_date = current_date
+                self._write_last_check_date(current_date)
 
                 # Wait before next check
                 await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)
 
             except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
-                await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)
+                logger.critical(f"Fatal error in monitoring loop: {e}")
+                self.monitoring = False
+                raise
 
     def stop_monitoring(self):
         """Stop the monitoring loop"""

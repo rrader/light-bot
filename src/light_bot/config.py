@@ -18,7 +18,8 @@ API_TOKEN = os.getenv('API_TOKEN')
 
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
-LAST_SCHEDULE_HASH_FILE = os.getenv('LAST_SCHEDULE_HASH_FILE', 'last_schedule_hash.txt')
+LAST_SCHEDULE_TODAY_HASH_FILE = os.getenv('LAST_SCHEDULE_TODAY_HASH_FILE', 'last_schedule_today_hash.txt')
+LAST_SCHEDULE_TOMORROW_HASH_FILE = os.getenv('LAST_SCHEDULE_TOMORROW_HASH_FILE', 'last_schedule_tomorrow_hash.txt')
 LAST_CHECK_DATE_FILE = os.getenv('LAST_CHECK_DATE_FILE', 'last_check_date.txt')
 TOMORROW_SENT_DATE_FILE = os.getenv('TOMORROW_SENT_DATE_FILE', 'tomorrow_sent_date.txt')
 
@@ -31,10 +32,12 @@ YASNO_API_BASE_URL = os.getenv('YASNO_API_BASE_URL')
 YASNO_GROUP = os.getenv('YASNO_GROUP', '2.1')
 YASNO_CITY = os.getenv('YASNO_CITY', 'kiev')
 SCHEDULE_CHECK_INTERVAL = int(os.getenv('SCHEDULE_CHECK_INTERVAL', 3600))  # Check every hour
-SCHEDULE_EVENING_HOUR = int(os.getenv('SCHEDULE_EVENING_HOUR', 20))  # 20:00 / 8 PM
-SCHEDULE_EVENING_MINUTE = int(os.getenv('SCHEDULE_EVENING_MINUTE', 0))
-SCHEDULE_CHANGES_START_HOUR = int(os.getenv('SCHEDULE_CHANGES_START_HOUR', 8))  # Start checking for changes at 8 AM
+# Today's schedule monitoring window
+SCHEDULE_TODAY_START_HOUR = int(os.getenv('SCHEDULE_TODAY_START_HOUR', 0))  # Start checking today's schedule at midnight
+SCHEDULE_TODAY_END_HOUR = int(os.getenv('SCHEDULE_TODAY_END_HOUR', 21))  # Stop checking today's schedule at 9 PM
+# Tomorrow's schedule monitoring window
 SCHEDULE_TOMORROW_START_HOUR = int(os.getenv('SCHEDULE_TOMORROW_START_HOUR', 18))  # Start checking tomorrow's schedule at 6 PM
+SCHEDULE_TOMORROW_END_HOUR = int(os.getenv('SCHEDULE_TOMORROW_END_HOUR', 23))  # Stop checking tomorrow's schedule at 11 PM
 
 # Validate required environment variables
 if not TELEGRAM_BOT_TOKEN:
