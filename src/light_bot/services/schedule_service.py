@@ -46,6 +46,64 @@ class ScheduleService:
         self.last_check_date = self._read_last_check_date()
         self.tomorrow_sent_date = self._read_tomorrow_sent_date()
         self.last_warning_sent = self._read_last_warning_sent()
+        # Schedule data cache with thread safety
+        self._cache_lock = asyncio.Lock()
+        self._cached_schedule: Optional[YasnoScheduleResponse] = None
+        self._cache_timestamp: Optional[datetime] = None
+
+    async def _get_cached_schedule(self) -> Optional[YasnoScheduleResponse]:
+        """Get cached schedule if still valid, otherwise fetch new data
+
+        Cache is considered valid if it's less than SCHEDULE_CHECK_INTERVAL old.
+        This allows multiple subsystems (schedule monitoring, warning system) to
+        reuse the same API data without redundant fetches.
+
+        Thread-safe: Uses asyncio.Lock to prevent race conditions when multiple
+        async tasks check cache simultaneously. Only one task will fetch fresh
+        data if cache expires, preventing cache stampede.
+
+        Returns:
+            Cached or fresh schedule data, or None if fetch fails
+        """
+        async with self._cache_lock:
+            now = datetime.now(TIMEZONE)
+
+            # Check if cache is still valid
+            if self._cached_schedule and self._cache_timestamp:
+                cache_age = (now - self._cache_timestamp).total_seconds()
+                if cache_age < SCHEDULE_CHECK_INTERVAL:
+                    logger.debug(f"Using cached schedule (age: {int(cache_age)}s)")
+                    return self._cached_schedule
+
+            # Fetch fresh data
+            logger.debug("Fetching fresh schedule data from API")
+            schedule_data = yasno_client.update()
+
+            if schedule_data:
+                self._cached_schedule = schedule_data
+                self._cache_timestamp = now
+                logger.debug("Schedule cache updated")
+            else:
+                logger.warning("Failed to fetch schedule data, cache invalidated")
+                self._cached_schedule = None
+                self._cache_timestamp = None
+
+            return schedule_data
+
+    def _invalidate_cache(self) -> None:
+        """Invalidate the schedule cache (e.g., after midnight rollover)
+
+        Note: This is a synchronous method that sets the cache timestamp to epoch,
+        causing the cache to be treated as expired. This avoids needing async/await
+        in the midnight rollover path while still being thread-safe.
+        """
+        # Set timestamp to epoch instead of None for thread-safe invalidation
+        # The next call to _get_cached_schedule will see it as expired
+        if self._cache_timestamp:
+            self._cache_timestamp = datetime.fromtimestamp(0, TIMEZONE)
+            logger.debug("Schedule cache invalidated (timestamp set to epoch)")
+        else:
+            logger.debug("Cache already empty")
 
     def _read_hash_file(self, file_path: str) -> Optional[str]:
         """Read schedule hash from file"""
@@ -179,13 +237,16 @@ class ScheduleService:
             return None
 
     async def send_schedule(self, for_tomorrow: bool = False, change_detected: bool = False) -> bool:
-        """Fetch and send schedule to Telegram channel"""
+        """Fetch and send schedule to Telegram channel
+
+        Uses cached schedule data when available to avoid redundant API calls.
+        """
         try:
             logger.info(f"Fetching schedule (tomorrow={for_tomorrow})...")
-            schedule_data = yasno_client.update()
+            schedule_data = await self._get_cached_schedule()
 
             if not schedule_data:
-                logger.error("Failed to fetch schedule data from Yasno API")
+                logger.error("Failed to get schedule data")
                 return False
 
             # Log the fetched data
@@ -248,16 +309,20 @@ class ScheduleService:
             return False
 
     async def check_outage_warnings(self) -> None:
-        """Check if we need to send a warning about upcoming outage"""
+        """Check if we need to send a warning about upcoming outage
+
+        Uses cached schedule data to avoid redundant API calls.
+        Cache is shared with the main schedule monitoring loop.
+        """
         try:
             now = datetime.now(TIMEZONE)
 
-            # Fetch current schedule
+            # Get schedule from cache (or fetch if needed)
             logger.debug("Checking for upcoming outages...")
-            schedule_data = yasno_client.update()
+            schedule_data = await self._get_cached_schedule()
 
             if not schedule_data:
-                logger.error("Failed to fetch schedule data for warning check")
+                logger.error("Failed to get schedule data for warning check")
                 return
 
             # Find next outage
@@ -337,6 +402,9 @@ class ScheduleService:
             logger.info("Cleared tomorrow sent date")
             self.tomorrow_sent_date = None
 
+            # Step 4: Invalidate schedule cache (new day = new data)
+            self._invalidate_cache()
+
             logger.info("Midnight rollover completed successfully")
         except OSError:
             logger.critical("Critical error during midnight rollover - stopping monitoring")
@@ -346,7 +414,10 @@ class ScheduleService:
             raise
 
     async def check_tomorrow_schedule(self) -> None:
-        """Check if tomorrow's schedule is available and ready (not WaitingForSchedule)"""
+        """Check if tomorrow's schedule is available and ready (not WaitingForSchedule)
+
+        Uses cached schedule data to avoid redundant API calls.
+        """
         try:
             current_date = datetime.now(TIMEZONE).date()
             current_hour = datetime.now(TIMEZONE).hour
@@ -362,10 +433,10 @@ class ScheduleService:
                 return
 
             logger.info("Checking if tomorrow's schedule is ready...")
-            schedule_data = yasno_client.update()
+            schedule_data = await self._get_cached_schedule()
 
             if not schedule_data:
-                logger.error("Failed to fetch schedule data")
+                logger.error("Failed to get schedule data")
                 return
 
             group_schedule = schedule_data.get_group(self.group)
@@ -409,7 +480,10 @@ class ScheduleService:
             logger.error(f"Error checking tomorrow's schedule: {e}")
 
     async def check_today_schedule(self):
-        """Check if today's schedule has changed and notify if it has"""
+        """Check if today's schedule has changed and notify if it has
+
+        Uses cached schedule data to avoid redundant API calls.
+        """
         try:
             current_hour = datetime.now(TIMEZONE).hour
 
@@ -419,10 +493,10 @@ class ScheduleService:
                 return
 
             logger.info("Checking for today's schedule changes...")
-            schedule_data = yasno_client.update()
+            schedule_data = await self._get_cached_schedule()
 
             if not schedule_data:
-                logger.error("Failed to fetch schedule data")
+                logger.error("Failed to get schedule data")
                 return
 
             current_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=False)
