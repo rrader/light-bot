@@ -99,19 +99,15 @@ class ScheduleFormatter:
         start_str = outage_start.strftime('%H:%M')
         end_str = outage_end.strftime('%H:%M')
 
-        # Calculate time until outage
+        # Always show "30 minutes" for consistency (warning is sent at 30±5 min window)
         now = datetime.now(TIMEZONE)
-        time_until = outage_start - now
-        minutes_until = int(time_until.total_seconds() / 60)
 
         message = (
-            f"⚠️ <b>ПОПЕРЕДЖЕННЯ ПРО ВІДКЛЮЧЕННЯ</b>\n\n"
-            f"🏠 Група: <b>{group}</b>\n"
-            f"⏰ Через <b>{minutes_until} хвилин</b>\n\n"
+            f"⚠️ <b>Наближається відключення за 30 хвилин</b>\n\n"
+            f"🏠 Група: <b>{group}</b>\n\n"
             f"<b>Час відключення:</b> {start_str}\n"
-            f"<b>Очікуване включення:</b> {end_str}\n\n"
-            f"🏢 Користуйтесь ліфтом з обережністю\n"
-            f"💡 Зарядіть пристрої та підготуйтесь до відключення\n\n"
+            f"<b>Заплановане включення:</b> {end_str}\n\n"
+            f"⚡️ З обережністю користуйтесь ліфтами та зарядіть пристрої\n\n"
             f"🕐 Надіслано: {now.strftime('%H:%M:%S')}"
         )
 
