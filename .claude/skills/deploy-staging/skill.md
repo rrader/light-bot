@@ -13,6 +13,7 @@ Deploy the Light Bot application to the staging server using SSH and Docker Comp
 - **Project Directory**: `services/light-bot-staging`
 - **Service Name**: `light-bot-staging`
 - **Telegram Channels**: `@power_po2_test` (for both status and schedule notifications in staging)
+- **Docker Compose File**: `/root/services/docker-compose.yml`
 
 ## Task
 Execute the deployment process to update the Light Bot on the staging server:

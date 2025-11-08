@@ -14,6 +14,7 @@ Promote the current staging commit to production and deploy the Light Bot applic
 - **SSH Host**: `root@rmn.pp.ua`
 - **Project Directory**: `services/light-bot-staging`
 - **Service Name**: `light-bot-staging`
+- **Docker Compose File**: `/root/services/docker-compose.yml`
 
 ### Production Server
 - **SSH Key**: `~/.ssh/personal`
@@ -21,6 +22,7 @@ Promote the current staging commit to production and deploy the Light Bot applic
 - **Project Directory**: `services/light-bot`
 - **Service Name**: `light-bot`
 - **Telegram Channels**: `@power_po2` (same as staging but without `_test` suffix)
+- **Docker Compose File**: `/root/services/docker-compose.yml`
 
 ## Task
 
