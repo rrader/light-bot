@@ -7,6 +7,7 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 1. **Power Status Monitoring**: Track remote host(s) availability and notify a Telegram channel of power status changes (on/off)
 2. **Daily Schedule Notifications**: Automatically send daily power outage schedules from Yasno API
 3. **Schedule Change Detection**: Monitor and notify about changes to power outage schedules during the day
+4. **Outage Warnings**: Send advance warnings 30 minutes before scheduled power outages with expected restoration time
 
 ## Tech Stack
 - **Backend**: Python 3.11, Flask, python-telegram-bot
@@ -24,6 +25,7 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 - **Schedule Notifications**:
   - Evening (20:00): Tomorrow's power outage schedule
   - Hourly checks: Detect and notify about schedule changes during the day
+  - Advance warnings: 30-minute advance notice before scheduled outages
 
 ## Key Files
 - `main.py` - Entry point, starts Flask server and schedule monitoring
@@ -55,6 +57,8 @@ Key environment variables in `.env`:
 - `YASNO_GROUP` - Power group to monitor (default: 2.1)
 - `SCHEDULE_CHECK_INTERVAL` - How often to check for changes in seconds (default: 3600)
 - `SCHEDULE_EVENING_HOUR` - Hour to send tomorrow's schedule (default: 20)
+- `OUTAGE_WARNING_MINUTES` - Minutes before outage to send warning (default: 30)
+- `OUTAGE_WARNING_CHECK_INTERVAL` - How often to check for upcoming outages in seconds (default: 300)
 
 ## Dependencies
 - **yasno_hass**: Power outage schedule API client adapted from [kuzin2006/yasno_hass](https://github.com/kuzin2006/yasno_hass) - originally a Home Assistant integration, modified to work as a standalone module for fetching Ukrainian power grid outage schedules from Yasno API

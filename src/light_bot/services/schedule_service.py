@@ -2,12 +2,12 @@ import logging
 import asyncio
 import hashlib
 import os
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
 from telegram import Bot
 from telegram.error import TelegramError
 
-from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse
+from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse, PowerSlot
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import (
@@ -20,10 +20,13 @@ from light_bot.config import (
     SCHEDULE_TODAY_END_HOUR,
     SCHEDULE_TOMORROW_START_HOUR,
     SCHEDULE_TOMORROW_END_HOUR,
+    OUTAGE_WARNING_MINUTES,
+    OUTAGE_WARNING_CHECK_INTERVAL,
     LAST_SCHEDULE_TODAY_HASH_FILE,
     LAST_SCHEDULE_TOMORROW_HASH_FILE,
     LAST_CHECK_DATE_FILE,
     TOMORROW_SENT_DATE_FILE,
+    LAST_WARNING_SENT_FILE,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,7 @@ class ScheduleService:
         self.last_tomorrow_hash = self._read_hash_file(LAST_SCHEDULE_TOMORROW_HASH_FILE)
         self.last_check_date = self._read_last_check_date()
         self.tomorrow_sent_date = self._read_tomorrow_sent_date()
+        self.last_warning_sent = self._read_last_warning_sent()
 
     def _read_hash_file(self, file_path: str) -> Optional[str]:
         """Read schedule hash from file"""
@@ -93,6 +97,63 @@ class ScheduleService:
         except Exception as e:
             logger.error(f"Error writing tomorrow sent date file: {e}")
             raise
+
+    def _read_last_warning_sent(self) -> Optional[str]:
+        """Read last warning identifier from file"""
+        return read_text(LAST_WARNING_SENT_FILE)
+
+    def _write_last_warning_sent(self, warning_id: str) -> None:
+        """Write last warning identifier to file atomically"""
+        try:
+            atomic_write_text(LAST_WARNING_SENT_FILE, warning_id)
+            logger.info(f"Last warning sent saved: {warning_id}")
+        except Exception as e:
+            logger.error(f"Error writing last warning file: {e}")
+            raise
+
+    def _find_next_outage(self, schedule_data: YasnoScheduleResponse) -> Optional[Tuple[datetime, datetime]]:
+        """Find the next scheduled outage (start time, end time)
+
+        Returns:
+            Tuple of (outage_start_datetime, outage_end_datetime) or None if no upcoming outage
+        """
+        try:
+            now = datetime.now(TIMEZONE)
+            current_minutes = now.hour * 60 + now.minute
+
+            group_schedule = schedule_data.get_group(self.group)
+            if not group_schedule:
+                logger.warning(f"Group {self.group} not found in schedule")
+                return None
+
+            # Check today's schedule first
+            today_schedule = group_schedule.today
+            outage_slots = self.formatter.get_outage_slots(today_schedule.slots)
+
+            for slot in outage_slots:
+                if slot.start > current_minutes:
+                    # Found upcoming outage today
+                    start_time = now.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
+                    end_time = now.replace(hour=slot.end // 60, minute=slot.end % 60, second=0, microsecond=0)
+                    return (start_time, end_time)
+
+            # Check tomorrow's schedule if no outage found today
+            tomorrow_schedule = group_schedule.tomorrow
+            tomorrow_outage_slots = self.formatter.get_outage_slots(tomorrow_schedule.slots)
+
+            if tomorrow_outage_slots:
+                # Get the first outage slot tomorrow
+                slot = tomorrow_outage_slots[0]
+                tomorrow = now + timedelta(days=1)
+                start_time = tomorrow.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
+                end_time = tomorrow.replace(hour=slot.end // 60, minute=slot.end % 60, second=0, microsecond=0)
+                return (start_time, end_time)
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error finding next outage: {e}")
+            return None
 
     def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[str]:
         """Compute hash of schedule to detect changes (date-independent)"""
@@ -161,6 +222,87 @@ class ScheduleService:
         except Exception as e:
             logger.error(f"Error sending schedule: {e}")
             return False
+
+    async def send_outage_warning(self, outage_start: datetime, outage_end: datetime) -> bool:
+        """Send warning about upcoming power outage"""
+        try:
+            message = self.formatter.format_outage_warning_message(
+                outage_start,
+                outage_end,
+                self.group
+            )
+
+            await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=message,
+                parse_mode='HTML'
+            )
+            logger.info(f"Warning sent for outage at {outage_start.strftime('%H:%M')}")
+            return True
+
+        except TelegramError as e:
+            logger.error(f"Failed to send warning message: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error sending warning: {e}")
+            return False
+
+    async def check_outage_warnings(self) -> None:
+        """Check if we need to send a warning about upcoming outage"""
+        try:
+            now = datetime.now(TIMEZONE)
+
+            # Fetch current schedule
+            logger.debug("Checking for upcoming outages...")
+            schedule_data = yasno_client.update()
+
+            if not schedule_data:
+                logger.error("Failed to fetch schedule data for warning check")
+                return
+
+            # Find next outage
+            next_outage = self._find_next_outage(schedule_data)
+            if not next_outage:
+                logger.debug("No upcoming outages found")
+                return
+
+            outage_start, outage_end = next_outage
+
+            # Check if we need to send warning
+            time_until_outage = (outage_start - now).total_seconds() / 60  # minutes
+
+            # Create unique warning ID (date + time to prevent duplicates)
+            warning_id = outage_start.strftime('%Y-%m-%d-%H:%M')
+
+            # Check if we should send warning
+            if OUTAGE_WARNING_MINUTES - 5 <= time_until_outage <= OUTAGE_WARNING_MINUTES + 5:
+                # Within warning window (±5 minutes tolerance)
+                if self.last_warning_sent != warning_id:
+                    logger.info(f"Sending warning for outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes)")
+
+                    if await self.send_outage_warning(outage_start, outage_end):
+                        self.last_warning_sent = warning_id
+                        self._write_last_warning_sent(warning_id)
+                else:
+                    logger.debug(f"Warning already sent for {warning_id}")
+            else:
+                logger.debug(f"Next outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes) - outside warning window")
+
+        except Exception as e:
+            logger.error(f"Error checking outage warnings: {e}")
+
+    async def outage_warning_loop(self):
+        """Separate monitoring loop for outage warnings (runs every 5 minutes)"""
+        logger.info(f"Starting outage warning monitoring (check interval: {OUTAGE_WARNING_CHECK_INTERVAL}s)")
+        logger.info(f"Warning time: {OUTAGE_WARNING_MINUTES} minutes before outage")
+
+        while self.monitoring:
+            try:
+                await self.check_outage_warnings()
+                await asyncio.sleep(OUTAGE_WARNING_CHECK_INTERVAL)
+            except Exception as e:
+                logger.error(f"Error in outage warning loop (will retry): {e}")
+                await asyncio.sleep(OUTAGE_WARNING_CHECK_INTERVAL)
 
     def _perform_midnight_rollover(self) -> None:
         """Perform midnight rollover: delete today's hash, promote tomorrow's hash to today's

@@ -5,7 +5,8 @@ source .env
 # Configuration
 TARGET_IP="${TARGET_IP:-192.168.1.152}"
 TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
-API_URL="https://light.rmn.pp.ua/power-status"
+API_URL_PROD="https://light.rmn.pp.ua/power-status"
+API_URL_STAGING="https://light-staging.rmn.pp.ua/power-status"
 API_TOKEN="${API_TOKEN:-your_api_token_here}"
 UDR_API_KEY="${UDR_API_KEY:-your_udr_api_key_here}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"  # seconds between checks
@@ -45,8 +46,10 @@ check_udr_host() {
 # Function to send status to API
 send_status() {
     local status=$1
+    local success=0
 
-    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
+    # Send to production
+    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_PROD" \
         -H "Authorization: $API_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}")
@@ -55,12 +58,30 @@ send_status() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -eq 200 ]; then
-        log "${GREEN}✓${NC} Status sent successfully: $status"
-        return 0
+        log "${GREEN}✓${NC} [PROD] Status sent successfully: $status"
+        success=1
     else
-        log "${RED}✗${NC} Failed to send status. HTTP code: $http_code, Response: $body"
-        return 1
+        log "${RED}✗${NC} [PROD] Failed to send status. HTTP code: $http_code, Response: $body"
     fi
+
+    # Send to staging
+    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_STAGING" \
+        -H "Authorization: $API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{\"status\": \"$status\"}")
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" -eq 200 ]; then
+        log "${GREEN}✓${NC} [STAGING] Status sent successfully: $status"
+        success=1
+    else
+        log "${RED}✗${NC} [STAGING] Failed to send status. HTTP code: $http_code, Response: $body"
+    fi
+
+    # Return success if at least one request succeeded
+    [ $success -eq 1 ] && return 0 || return 1
 }
 
 # Main monitoring loop
@@ -68,7 +89,8 @@ main() {
     log "${YELLOW}Starting host monitoring...${NC}"
     log "Target IP (ping): $TARGET_IP"
     log "Target UDR IP: $TARGET_UDR_IP"
-    log "API: $API_URL"
+    log "API (Production): $API_URL_PROD"
+    log "API (Staging): $API_URL_STAGING"
     log "Check interval: ${CHECK_INTERVAL}s"
     log "Ping timeout: ${PING_TIMEOUT}s"
     log "Consecutive checks for ON: $CONSECUTIVE_CHECKS_ON"

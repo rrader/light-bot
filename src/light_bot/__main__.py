@@ -13,11 +13,15 @@ logger = logging.getLogger(__name__)
 
 
 def run_schedule_monitoring():
-    """Run schedule monitoring in dedicated event loop"""
+    """Run schedule monitoring and outage warnings in dedicated event loop"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(schedule_service.schedule_monitoring_loop())
+        # Run both monitoring loops in parallel
+        loop.run_until_complete(asyncio.gather(
+            schedule_service.schedule_monitoring_loop(),
+            schedule_service.outage_warning_loop()
+        ))
     except Exception as e:
         logger.error(f"Schedule monitoring error: {e}")
     finally:

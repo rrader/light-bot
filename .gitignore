@@ -27,6 +27,7 @@ watchdog_status.txt
 last_schedule_hash.txt
 last_check_date.txt
 tomorrow_sent_date.txt
+last_warning_sent.txt
 test_*.txt
 
 # Testing

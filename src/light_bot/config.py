@@ -38,6 +38,10 @@ SCHEDULE_TODAY_END_HOUR = int(os.getenv('SCHEDULE_TODAY_END_HOUR', 21))  # Stop 
 # Tomorrow's schedule monitoring window
 SCHEDULE_TOMORROW_START_HOUR = int(os.getenv('SCHEDULE_TOMORROW_START_HOUR', 18))  # Start checking tomorrow's schedule at 6 PM
 SCHEDULE_TOMORROW_END_HOUR = int(os.getenv('SCHEDULE_TOMORROW_END_HOUR', 23))  # Stop checking tomorrow's schedule at 11 PM
+# Outage warning configuration
+OUTAGE_WARNING_MINUTES = int(os.getenv('OUTAGE_WARNING_MINUTES', 30))  # Send warning 30 minutes before outage
+OUTAGE_WARNING_CHECK_INTERVAL = int(os.getenv('OUTAGE_WARNING_CHECK_INTERVAL', 300))  # Check every 5 minutes
+LAST_WARNING_SENT_FILE = os.getenv('LAST_WARNING_SENT_FILE', 'last_warning_sent.txt')
 
 # Validate required environment variables
 if not TELEGRAM_BOT_TOKEN:
