@@ -31,6 +31,10 @@ from light_bot.config import (
 
 logger = logging.getLogger(__name__)
 
+# Time constants for midnight boundary handling
+MINUTES_PER_DAY = 1440
+HOURS_PER_DAY = 24
+
 
 class ScheduleService:
     """Service to monitor and send power outage schedule notifications"""
@@ -160,6 +164,25 @@ class ScheduleService:
         """Read last warning identifier from file"""
         return read_text(LAST_WARNING_SENT_FILE)
 
+    def _create_outage_datetime(self, base_date: datetime, minutes: int) -> datetime:
+        """Create datetime from minutes since midnight, handling midnight boundary
+
+        Args:
+            base_date: The reference date to create time from
+            minutes: Minutes since midnight (can be >= MINUTES_PER_DAY for next day)
+
+        Returns:
+            datetime with proper date adjustment for midnight boundary
+        """
+        hour = minutes // 60
+        minute = minutes % 60
+
+        if hour >= HOURS_PER_DAY:
+            # Midnight boundary: move to next day
+            return base_date.replace(hour=0, minute=minute, second=0, microsecond=0) + timedelta(days=1)
+        else:
+            return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
     def _write_last_warning_sent(self, warning_id: str) -> None:
         """Write last warning identifier to file atomically"""
         try:
@@ -171,6 +194,10 @@ class ScheduleService:
 
     def _find_next_outage(self, schedule_data: YasnoScheduleResponse) -> Optional[Tuple[datetime, datetime]]:
         """Find the next scheduled outage (start time, end time)
+
+        Handles midnight boundary cases: slots ending at 24:00 (1440 minutes)
+        are converted to 00:00 of the next day to avoid datetime errors.
+        Also handles slots starting at or past midnight (>= 1440 minutes).
 
         Returns:
             Tuple of (outage_start_datetime, outage_end_datetime) or None if no upcoming outage
@@ -191,13 +218,8 @@ class ScheduleService:
             for slot in outage_slots:
                 if slot.start > current_minutes:
                     # Found upcoming outage today
-                    start_time = now.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
-                    # Handle midnight case: 24:00 -> 00:00 next day
-                    end_hour = slot.end // 60
-                    if end_hour >= 24:
-                        end_time = now.replace(hour=0, minute=slot.end % 60, second=0, microsecond=0) + timedelta(days=1)
-                    else:
-                        end_time = now.replace(hour=end_hour, minute=slot.end % 60, second=0, microsecond=0)
+                    start_time = self._create_outage_datetime(now, slot.start)
+                    end_time = self._create_outage_datetime(now, slot.end)
                     return (start_time, end_time)
 
             # Check tomorrow's schedule if no outage found today
@@ -208,13 +230,8 @@ class ScheduleService:
                 # Get the first outage slot tomorrow
                 slot = tomorrow_outage_slots[0]
                 tomorrow = now + timedelta(days=1)
-                start_time = tomorrow.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
-                # Handle midnight case: 24:00 -> 00:00 next day
-                end_hour = slot.end // 60
-                if end_hour >= 24:
-                    end_time = tomorrow.replace(hour=0, minute=slot.end % 60, second=0, microsecond=0) + timedelta(days=1)
-                else:
-                    end_time = tomorrow.replace(hour=end_hour, minute=slot.end % 60, second=0, microsecond=0)
+                start_time = self._create_outage_datetime(tomorrow, slot.start)
+                end_time = self._create_outage_datetime(tomorrow, slot.end)
                 return (start_time, end_time)
 
             return None

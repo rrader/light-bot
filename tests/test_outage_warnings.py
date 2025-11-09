@@ -352,3 +352,45 @@ class TestOutageWarnings:
 
         # Verify the end time is after start time
         assert outage_end > outage_start
+
+    @pytest.mark.asyncio
+    async def test_find_next_outage_past_midnight(self, mock_schedule_service):
+        """Test outage slot that goes past midnight (e.g., 22:00-01:00)
+
+        This tests slots that span across midnight, where end time is
+        represented as > 1440 minutes (e.g., 1500 = 25:00 = 01:00 next day)
+        """
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+
+        # Skip test if current time would make this slot in the past
+        if now.hour >= 22:
+            pytest.skip("Test only runs before 22:00 to ensure slot is in future")
+
+        # Create slot from 22:00 to 01:00 next day (represented as 25:00)
+        today_slots = [
+            PowerSlot(start=1320, end=1500, type=SlotType.DEFINITE)  # 22:00 - 25:00 (01:00 next day)
+        ]
+        tomorrow_slots = []
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        result = mock_schedule_service._find_next_outage(mock_schedule)
+
+        # Should handle this without error
+        assert result is not None
+        outage_start, outage_end = result
+
+        # Start should be 22:00
+        assert outage_start.hour == 22
+        assert outage_start.minute == 0
+
+        # End should be 01:00 next day (not hour=25!)
+        assert outage_end.hour == 1
+        assert outage_end.minute == 0
+
+        # End should be one day after start
+        assert (outage_end.date() - outage_start.date()).days == 1
+
+        # Verify the end time is after start time
+        assert outage_end > outage_start
