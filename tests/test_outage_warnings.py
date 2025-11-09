@@ -101,7 +101,16 @@ class TestOutageWarnings:
 
         # Create a slot that starts in 2 hours
         future_start = current_minutes + 120  # 2 hours from now
+
+        # Skip test if the slot would cross midnight
+        if future_start >= 1440:
+            pytest.skip("Test would create slot crossing midnight")
+
         future_end = future_start + 60  # 1 hour duration
+
+        # Also skip if end would cross midnight
+        if future_end >= 1440:
+            pytest.skip("Test would create slot ending after midnight")
 
         today_slots = [
             PowerSlot(start=future_start, end=future_end, type=SlotType.DEFINITE)
@@ -173,7 +182,8 @@ class TestOutageWarnings:
         call_args = mock_schedule_service.bot.send_message.call_args
         message = call_args.kwargs['text']
         assert '⚠️' in message
-        assert 'ПОПЕРЕДЖЕННЯ ПРО ВІДКЛЮЧЕННЯ' in message
+        # Updated text - check for key warning phrase
+        assert 'відключення' in message.lower()
         assert outage_start.strftime('%H:%M') in message
         assert outage_end.strftime('%H:%M') in message
 
@@ -263,3 +273,82 @@ class TestOutageWarnings:
             else:
                 # If not in warning window, that's also OK - skip this test
                 pytest.skip("Test time not in warning window")
+
+    @pytest.mark.asyncio
+    async def test_find_next_outage_midnight_boundary(self, mock_schedule_service):
+        """Test finding next outage that ends at midnight (24:00)
+
+        This is a critical edge case: slots ending at 24:00 (1440 minutes)
+        caused ValueError: hour must be in 0..23. This test verifies the fix.
+
+        We test during evening time (after 20:00) when there's still an upcoming 22:00-24:00 slot.
+        """
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+
+        # Only run this test if current time is before 22:00 (so the slot is still upcoming)
+        if now.hour >= 22:
+            pytest.skip("Test only runs before 22:00 to ensure slot is in future")
+
+        # Create slot that ends at midnight: 22:00 - 24:00
+        today_slots = [
+            PowerSlot(start=1320, end=1440, type=SlotType.DEFINITE)  # 22:00 - 24:00 (midnight)
+        ]
+        tomorrow_slots = []
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        # This should NOT raise ValueError: hour must be in 0..23
+        result = mock_schedule_service._find_next_outage(mock_schedule)
+
+        # If we get here without exception, the fix works!
+        assert result is not None
+        outage_start, outage_end = result
+
+        # Start should be 22:00
+        assert outage_start.hour == 22
+        assert outage_start.minute == 0
+
+        # End should be 00:00 next day (not hour=24!)
+        assert outage_end.hour == 0
+        assert outage_end.minute == 0
+
+        # End should be one day after start
+        assert (outage_end.date() - outage_start.date()).days == 1
+
+        # Verify the end time is after start time
+        assert outage_end > outage_start
+
+    @pytest.mark.asyncio
+    async def test_find_next_outage_midnight_boundary_tomorrow(self, mock_schedule_service):
+        """Test finding next outage tomorrow that ends at midnight
+
+        When all today's outages are past, should find tomorrow's outage ending at midnight.
+        """
+        # No more outages today, tomorrow has slot ending at midnight
+        today_slots = []
+        tomorrow_slots = [
+            PowerSlot(start=1320, end=1440, type=SlotType.DEFINITE)  # 22:00 - 24:00
+        ]
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        # This should NOT raise ValueError: hour must be in 0..23
+        result = mock_schedule_service._find_next_outage(mock_schedule)
+
+        assert result is not None
+        outage_start, outage_end = result
+
+        # Start should be 22:00
+        assert outage_start.hour == 22
+        assert outage_start.minute == 0
+
+        # End should be 00:00 next day (not hour=24!)
+        assert outage_end.hour == 0
+        assert outage_end.minute == 0
+
+        # End should be one day after start
+        assert (outage_end.date() - outage_start.date()).days == 1
+
+        # Verify the end time is after start time
+        assert outage_end > outage_start

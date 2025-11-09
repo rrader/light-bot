@@ -192,7 +192,12 @@ class ScheduleService:
                 if slot.start > current_minutes:
                     # Found upcoming outage today
                     start_time = now.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
-                    end_time = now.replace(hour=slot.end // 60, minute=slot.end % 60, second=0, microsecond=0)
+                    # Handle midnight case: 24:00 -> 00:00 next day
+                    end_hour = slot.end // 60
+                    if end_hour >= 24:
+                        end_time = now.replace(hour=0, minute=slot.end % 60, second=0, microsecond=0) + timedelta(days=1)
+                    else:
+                        end_time = now.replace(hour=end_hour, minute=slot.end % 60, second=0, microsecond=0)
                     return (start_time, end_time)
 
             # Check tomorrow's schedule if no outage found today
@@ -204,7 +209,12 @@ class ScheduleService:
                 slot = tomorrow_outage_slots[0]
                 tomorrow = now + timedelta(days=1)
                 start_time = tomorrow.replace(hour=slot.start // 60, minute=slot.start % 60, second=0, microsecond=0)
-                end_time = tomorrow.replace(hour=slot.end // 60, minute=slot.end % 60, second=0, microsecond=0)
+                # Handle midnight case: 24:00 -> 00:00 next day
+                end_hour = slot.end // 60
+                if end_hour >= 24:
+                    end_time = tomorrow.replace(hour=0, minute=slot.end % 60, second=0, microsecond=0) + timedelta(days=1)
+                else:
+                    end_time = tomorrow.replace(hour=end_hour, minute=slot.end % 60, second=0, microsecond=0)
                 return (start_time, end_time)
 
             return None
