@@ -192,12 +192,29 @@ class ScheduleService:
             logger.error(f"Error writing last warning file: {e}")
             raise
 
+    def _is_continuous_outage(self, today_end_minutes: int, tomorrow_start_minutes: int) -> bool:
+        """Check if today's outage ending at midnight continues into tomorrow's outage
+
+        Args:
+            today_end_minutes: End time of today's slot in minutes (e.g., 1440 for 24:00)
+            tomorrow_start_minutes: Start time of tomorrow's slot in minutes (e.g., 0 for 00:00)
+
+        Returns:
+            True if outages are continuous across midnight (no gap between them)
+        """
+        # If today ends at midnight (24:00 = 1440) and tomorrow starts at midnight (00:00 = 0)
+        # then it's one continuous outage with no gap
+        return today_end_minutes >= MINUTES_PER_DAY and tomorrow_start_minutes == 0
+
     def _find_next_outage(self, schedule_data: YasnoScheduleResponse) -> Optional[Tuple[datetime, datetime]]:
         """Find the next scheduled outage (start time, end time)
 
         Handles midnight boundary cases: slots ending at 24:00 (1440 minutes)
         are converted to 00:00 of the next day to avoid datetime errors.
         Also handles slots starting at or past midnight (>= 1440 minutes).
+
+        Detects continuous outages across midnight: if today's outage ends at 24:00
+        and tomorrow's starts at 00:00, treats them as one continuous outage.
 
         Returns:
             Tuple of (outage_start_datetime, outage_end_datetime) or None if no upcoming outage
@@ -219,7 +236,21 @@ class ScheduleService:
                 if slot.start > current_minutes:
                     # Found upcoming outage today
                     start_time = self._create_outage_datetime(now, slot.start)
-                    end_time = self._create_outage_datetime(now, slot.end)
+
+                    # Check if this outage continues into tomorrow
+                    tomorrow_schedule = group_schedule.tomorrow
+                    tomorrow_outage_slots = self.formatter.get_outage_slots(tomorrow_schedule.slots)
+
+                    if (tomorrow_outage_slots and
+                        self._is_continuous_outage(slot.end, tomorrow_outage_slots[0].start)):
+                        # Continuous outage: use tomorrow's end time
+                        tomorrow = now + timedelta(days=1)
+                        end_time = self._create_outage_datetime(tomorrow, tomorrow_outage_slots[0].end)
+                        logger.info(f"Detected continuous outage across midnight: {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
+                    else:
+                        # Regular outage: use today's end time
+                        end_time = self._create_outage_datetime(now, slot.end)
+
                     return (start_time, end_time)
 
             # Check tomorrow's schedule if no outage found today

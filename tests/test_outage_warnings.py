@@ -394,3 +394,107 @@ class TestOutageWarnings:
 
         # Verify the end time is after start time
         assert outage_end > outage_start
+
+    @pytest.mark.asyncio
+    async def test_continuous_outage_across_midnight(self, mock_schedule_service):
+        """Test that continuous outages across midnight are treated as one period
+
+        If today's outage ends at 24:00 and tomorrow's starts at 00:00,
+        this should be treated as ONE continuous outage, not two separate ones.
+        This prevents sending duplicate warnings.
+        """
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+
+        # Skip test if current time would make this slot in the past
+        if now.hour >= 22:
+            pytest.skip("Test only runs before 22:00 to ensure slot is in future")
+
+        # Today: 22:00 - 24:00
+        today_slots = [
+            PowerSlot(start=1320, end=1440, type=SlotType.DEFINITE)  # 22:00 - 24:00 (midnight)
+        ]
+        
+        # Tomorrow: 00:00 - 02:00 (continuous from today)
+        tomorrow_slots = [
+            PowerSlot(start=0, end=120, type=SlotType.DEFINITE)  # 00:00 - 02:00
+        ]
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        result = mock_schedule_service._find_next_outage(mock_schedule)
+
+        assert result is not None
+        outage_start, outage_end = result
+
+        # Start should be 22:00 today
+        assert outage_start.hour == 22
+        assert outage_start.minute == 0
+
+        # End should be 02:00 tomorrow (NOT 00:00 - continuous outage!)
+        assert outage_end.hour == 2
+        assert outage_end.minute == 0
+
+        # End should be one day after start
+        assert (outage_end.date() - outage_start.date()).days == 1
+
+        # Duration should be 4 hours (22:00 - 02:00)
+        duration = (outage_end - outage_start).total_seconds() / 3600
+        assert duration == 4.0
+
+    @pytest.mark.asyncio
+    async def test_non_continuous_outage_with_gap(self, mock_schedule_service):
+        """Test that outages with a gap are NOT treated as continuous
+
+        If today ends at 24:00 but tomorrow starts at 01:00 (not 00:00),
+        these are separate outages with a 1-hour gap.
+        """
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+
+        if now.hour >= 22:
+            pytest.skip("Test only runs before 22:00")
+
+        # Today: 22:00 - 24:00
+        today_slots = [
+            PowerSlot(start=1320, end=1440, type=SlotType.DEFINITE)
+        ]
+        
+        # Tomorrow: 01:00 - 03:00 (NOT continuous - there's a 1-hour gap)
+        tomorrow_slots = [
+            PowerSlot(start=60, end=180, type=SlotType.DEFINITE)  # 01:00 - 03:00
+        ]
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        result = mock_schedule_service._find_next_outage(mock_schedule)
+
+        assert result is not None
+        outage_start, outage_end = result
+
+        # Start should be 22:00 today
+        assert outage_start.hour == 22
+
+        # End should be 00:00 tomorrow (midnight - NOT 03:00, since there's a gap)
+        assert outage_end.hour == 0
+        assert outage_end.minute == 0
+
+        # Duration should be 2 hours (22:00 - 00:00), not 5 hours
+        duration = (outage_end - outage_start).total_seconds() / 3600
+        assert duration == 2.0
+
+    @pytest.mark.asyncio
+    async def test_is_continuous_outage_helper(self, mock_schedule_service):
+        """Test the _is_continuous_outage helper method directly"""
+        
+        # Case 1: Today ends at 24:00 (1440), tomorrow starts at 00:00 (0) → continuous
+        assert mock_schedule_service._is_continuous_outage(1440, 0) is True
+        
+        # Case 2: Today ends at 24:00 (1440), tomorrow starts at 01:00 (60) → NOT continuous
+        assert mock_schedule_service._is_continuous_outage(1440, 60) is False
+        
+        # Case 3: Today ends at 23:00 (1380), tomorrow starts at 00:00 (0) → NOT continuous
+        assert mock_schedule_service._is_continuous_outage(1380, 0) is False
+        
+        # Case 4: Today ends at 23:30 (1410), tomorrow starts at 00:00 (0) → NOT continuous
+        assert mock_schedule_service._is_continuous_outage(1410, 0) is False
