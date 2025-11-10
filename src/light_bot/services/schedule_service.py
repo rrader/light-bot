@@ -595,28 +595,34 @@ class ScheduleService:
             try:
                 now = datetime.now(TIMEZONE)
                 current_date = now.date()
+                rollover_performed = False
 
                 # Check if it's a new day - perform midnight rollover
                 if self.last_check_date is not None and current_date != self.last_check_date:
                     logger.info(f"New day detected! {self.last_check_date} -> {current_date}")
                     try:
                         self._perform_midnight_rollover()
+                        rollover_performed = True
                     except OSError as e:
                         logger.critical(f"Critical: Midnight rollover failed, stopping monitoring: {e}")
                         self.monitoring = False
                         raise
 
-                # Check today's schedule for changes (independent monitoring)
-                try:
-                    await self.check_today_schedule()
-                except Exception as e:
-                    logger.error(f"Error checking today's schedule (will retry): {e}")
+                # Skip schedule checks immediately after rollover to allow API to update
+                if not rollover_performed:
+                    # Check today's schedule for changes (independent monitoring)
+                    try:
+                        await self.check_today_schedule()
+                    except Exception as e:
+                        logger.error(f"Error checking today's schedule (will retry): {e}")
 
-                # Check tomorrow's schedule (independent monitoring)
-                try:
-                    await self.check_tomorrow_schedule()
-                except Exception as e:
-                    logger.error(f"Error checking tomorrow's schedule (will retry): {e}")
+                    # Check tomorrow's schedule (independent monitoring)
+                    try:
+                        await self.check_tomorrow_schedule()
+                    except Exception as e:
+                        logger.error(f"Error checking tomorrow's schedule (will retry): {e}")
+                else:
+                    logger.info("Skipping schedule checks immediately after rollover (allowing API to update)")
 
                 # Update the last check date
                 self.last_check_date = current_date
