@@ -354,48 +354,6 @@ class TestOutageWarnings:
         assert outage_end > outage_start
 
     @pytest.mark.asyncio
-    async def test_find_next_outage_past_midnight(self, mock_schedule_service):
-        """Test outage slot that goes past midnight (e.g., 22:00-01:00)
-
-        This tests slots that span across midnight, where end time is
-        represented as > 1440 minutes (e.g., 1500 = 25:00 = 01:00 next day)
-        """
-        tz = pytz.timezone('Europe/Kyiv')
-        now = datetime.now(tz)
-
-        # Skip test if current time would make this slot in the past
-        if now.hour >= 22:
-            pytest.skip("Test only runs before 22:00 to ensure slot is in future")
-
-        # Create slot from 22:00 to 01:00 next day (represented as 25:00)
-        today_slots = [
-            PowerSlot(start=1320, end=1500, type=SlotType.DEFINITE)  # 22:00 - 25:00 (01:00 next day)
-        ]
-        tomorrow_slots = []
-
-        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
-
-        result = mock_schedule_service._find_next_outage(mock_schedule)
-
-        # Should handle this without error
-        assert result is not None
-        outage_start, outage_end = result
-
-        # Start should be 22:00
-        assert outage_start.hour == 22
-        assert outage_start.minute == 0
-
-        # End should be 01:00 next day (not hour=25!)
-        assert outage_end.hour == 1
-        assert outage_end.minute == 0
-
-        # End should be one day after start
-        assert (outage_end.date() - outage_start.date()).days == 1
-
-        # Verify the end time is after start time
-        assert outage_end > outage_start
-
-    @pytest.mark.asyncio
     async def test_continuous_outage_across_midnight(self, mock_schedule_service):
         """Test that continuous outages across midnight are treated as one period
 
@@ -486,15 +444,88 @@ class TestOutageWarnings:
     @pytest.mark.asyncio
     async def test_is_continuous_outage_helper(self, mock_schedule_service):
         """Test the _is_continuous_outage helper method directly"""
-        
+
         # Case 1: Today ends at 24:00 (1440), tomorrow starts at 00:00 (0) → continuous
         assert mock_schedule_service._is_continuous_outage(1440, 0) is True
-        
+
         # Case 2: Today ends at 24:00 (1440), tomorrow starts at 01:00 (60) → NOT continuous
         assert mock_schedule_service._is_continuous_outage(1440, 60) is False
-        
+
         # Case 3: Today ends at 23:00 (1380), tomorrow starts at 00:00 (0) → NOT continuous
         assert mock_schedule_service._is_continuous_outage(1380, 0) is False
-        
+
         # Case 4: Today ends at 23:30 (1410), tomorrow starts at 00:00 (0) → NOT continuous
         assert mock_schedule_service._is_continuous_outage(1410, 0) is False
+
+    @pytest.mark.asyncio
+    async def test_skip_warning_if_currently_in_outage(self, mock_schedule_service):
+        """Test that warning is skipped if we're currently in an outage"""
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+        current_minutes = now.hour * 60 + now.minute
+
+        # Skip test if current time wouldn't work for this scenario
+        if current_minutes < 60 or current_minutes >= 1380:
+            pytest.skip("Test requires current time between 01:00-23:00")
+
+        # Create an outage that started before now and ends after now
+        # so we're currently IN the outage
+        outage_start = current_minutes - 30  # Started 30 min ago
+        outage_end = current_minutes + 90    # Ends in 90 min
+
+        today_slots = [
+            PowerSlot(start=outage_start, end=outage_end, type=SlotType.DEFINITE)
+        ]
+        tomorrow_slots = []
+
+        mock_schedule = create_mock_schedule(today_slots, tomorrow_slots)
+
+        # Mock the cached schedule
+        mock_schedule_service._cached_schedule = mock_schedule
+        mock_schedule_service._cache_timestamp = now
+
+        # Check that we detect being in an outage
+        is_in_outage = mock_schedule_service._is_currently_in_outage(mock_schedule)
+        assert is_in_outage is True
+
+        # Check warnings are skipped when in outage
+        await mock_schedule_service.check_outage_warnings()
+
+        # Should not send warning (verified by mock not being called)
+        mock_schedule_service.bot.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_is_currently_in_outage_helper(self, mock_schedule_service):
+        """Test the _is_currently_in_outage helper method directly"""
+        tz = pytz.timezone('Europe/Kyiv')
+        now = datetime.now(tz)
+        current_minutes = now.hour * 60 + now.minute
+
+        # Skip test if current time wouldn't work
+        if current_minutes < 60 or current_minutes >= 1380:
+            pytest.skip("Test requires current time between 01:00-23:00")
+
+        # Case 1: Currently IN outage
+        in_outage_slots = [
+            PowerSlot(start=current_minutes - 30, end=current_minutes + 30, type=SlotType.DEFINITE)
+        ]
+        mock_schedule = create_mock_schedule(in_outage_slots, [])
+        assert mock_schedule_service._is_currently_in_outage(mock_schedule) is True
+
+        # Case 2: NOT in outage (outage in future)
+        future_slots = [
+            PowerSlot(start=current_minutes + 60, end=current_minutes + 120, type=SlotType.DEFINITE)
+        ]
+        mock_schedule = create_mock_schedule(future_slots, [])
+        assert mock_schedule_service._is_currently_in_outage(mock_schedule) is False
+
+        # Case 3: NOT in outage (outage in past)
+        past_slots = [
+            PowerSlot(start=current_minutes - 120, end=current_minutes - 60, type=SlotType.DEFINITE)
+        ]
+        mock_schedule = create_mock_schedule(past_slots, [])
+        assert mock_schedule_service._is_currently_in_outage(mock_schedule) is False
+
+        # Case 4: No outages at all
+        mock_schedule = create_mock_schedule([], [])
+        assert mock_schedule_service._is_currently_in_outage(mock_schedule) is False

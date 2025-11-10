@@ -206,6 +206,35 @@ class ScheduleService:
         # then it's one continuous outage with no gap
         return today_end_minutes >= MINUTES_PER_DAY and tomorrow_start_minutes == 0
 
+    def _is_currently_in_outage(self, schedule_data: YasnoScheduleResponse) -> bool:
+        """Check if we are currently in the middle of an outage
+
+        Returns:
+            True if current time falls within an active outage slot
+        """
+        try:
+            now = datetime.now(TIMEZONE)
+            current_minutes = now.hour * 60 + now.minute
+
+            group_schedule = schedule_data.get_group(self.group)
+            if not group_schedule:
+                return False
+
+            # Check today's schedule for current outage
+            today_schedule = group_schedule.today
+            outage_slots = self.formatter.get_outage_slots(today_schedule.slots)
+
+            for slot in outage_slots:
+                # Check if current time is within this outage slot
+                if slot.start <= current_minutes < slot.end:
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking if currently in outage: {e}")
+            return False
+
     def _find_next_outage(self, schedule_data: YasnoScheduleResponse) -> Optional[Tuple[datetime, datetime]]:
         """Find the next scheduled outage (start time, end time)
 
@@ -381,6 +410,11 @@ class ScheduleService:
 
             if not schedule_data:
                 logger.error("Failed to get schedule data for warning check")
+                return
+
+            # Skip warning if we're currently in an outage
+            if self._is_currently_in_outage(schedule_data):
+                logger.debug("Currently in outage, skipping warning for next outage")
                 return
 
             # Find next outage
