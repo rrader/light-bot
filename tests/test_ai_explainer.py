@@ -15,7 +15,7 @@ class TestScheduleChangeExplainer:
     @pytest.fixture
     def explainer(self):
         """Create explainer instance with mock API key"""
-        return ScheduleChangeExplainer(api_key="test-api-key", model="gpt-5-nano")
+        return ScheduleChangeExplainer(api_key="test-api-key", model="gpt-4o-mini")
 
     def test_format_slots_for_prompt_with_outages(self, explainer):
         """Test formatting slots into readable text"""
@@ -102,7 +102,7 @@ class TestScheduleChangeExplainer:
 
         # Check API call parameters
         call_kwargs = explainer.client.chat.completions.create.call_args.kwargs
-        assert call_kwargs['model'] == 'gpt-5-nano'
+        assert call_kwargs['model'] == 'gpt-4o-mini'
         assert call_kwargs['max_completion_tokens'] == 150
         assert call_kwargs['timeout'] == 10.0
 

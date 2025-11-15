@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 class ScheduleChangeExplainer:
     """Generate human-readable explanations of schedule changes using OpenAI API"""
 
-    def __init__(self, api_key: str, model: str = "gpt-5-nano"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         """Initialize the explainer with OpenAI API credentials
 
         Args:
             api_key: OpenAI API key
-            model: OpenAI model to use (default: gpt-5-nano)
+            model: OpenAI model to use (default: gpt-4o-mini)
         """
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model

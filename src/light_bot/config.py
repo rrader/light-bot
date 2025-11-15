@@ -55,7 +55,7 @@ LAST_WARNING_SENT_FILE = os.getenv('LAST_WARNING_SENT_FILE', 'last_warning_sent.
 
 # OpenAI API Configuration (optional - for AI explanations of schedule changes)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # Optional: OpenAI API key
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5-nano')  # OpenAI model for explanations
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')  # OpenAI model for explanations
 ENABLE_AI_EXPLANATIONS = os.getenv('ENABLE_AI_EXPLANATIONS', 'true').lower() == 'true'  # Enable/disable AI explanations
 
 # Validate required environment variables
