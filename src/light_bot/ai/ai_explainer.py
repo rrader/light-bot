@@ -44,26 +44,31 @@ class ScheduleChangeExplainer:
 
         return ", ".join(formatted)
 
-    def _build_prompt(self, old_schedule: dict, new_schedule: dict, current_time_minutes: int) -> str:
+    def _build_prompt(self, old_schedule: dict, new_schedule: dict, current_time_minutes: Optional[int] = None) -> str:
         """Build the prompt for OpenAI API
 
         Args:
             old_schedule: Previous schedule data
             new_schedule: New schedule data
-            current_time_minutes: Current time in minutes since midnight
+            current_time_minutes: Current time in minutes since midnight (None for tomorrow's schedule)
 
         Returns:
             Formatted prompt string
         """
-        current_h = current_time_minutes // 60
-        current_m = current_time_minutes % 60
-
         old_slots_text = self._format_slots_for_prompt(old_schedule.get('slots', []))
         new_slots_text = self._format_slots_for_prompt(new_schedule.get('slots', []))
 
+        # For tomorrow's schedule, don't mention current time
+        if current_time_minutes is None:
+            time_context = "Це графік на ЗАВТРА"
+        else:
+            current_h = current_time_minutes // 60
+            current_m = current_time_minutes % 60
+            time_context = f"Поточний час: {current_h:02d}:{current_m:02d}"
+
         prompt = f"""Ти - помічник який коротко пояснює зміни в графіку відключень світла.
 
-Поточний час: {current_h:02d}:{current_m:02d}
+{time_context}
 Старий графік: {old_slots_text}
 Новий графік: {new_slots_text}
 
@@ -94,14 +99,14 @@ class ScheduleChangeExplainer:
         self,
         old_schedule: dict,
         new_schedule: dict,
-        current_time_minutes: int
+        current_time_minutes: Optional[int] = None
     ) -> Optional[str]:
         """Generate AI explanation of schedule changes
 
         Args:
             old_schedule: Previous schedule data (from JSON file)
             new_schedule: New schedule data (from API)
-            current_time_minutes: Current time in minutes since midnight
+            current_time_minutes: Current time in minutes since midnight (None for tomorrow's schedule)
 
         Returns:
             Human-readable explanation in Ukrainian, or None if API fails

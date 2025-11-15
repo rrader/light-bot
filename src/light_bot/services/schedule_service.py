@@ -714,9 +714,27 @@ class ScheduleService:
             if tomorrow_schedule.status != "WaitingForSchedule":
                 logger.info(f"Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
 
-                # Send tomorrow's schedule
+                # Check if this is a change (not first time)
                 change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
-                await self.send_schedule(for_tomorrow=True, change_detected=change_detected)
+
+                # Generate AI explanation if this is a change
+                ai_explanation = None
+                if change_detected and self.ai_explainer and schedule_dict:
+                    old_schedule_dict = self._read_schedule_data_file(LAST_SCHEDULE_TOMORROW_DATA_FILE)
+                    if old_schedule_dict:
+                        try:
+                            # For tomorrow's schedule, don't pass current_time_minutes (use None)
+                            ai_explanation = await self.ai_explainer.explain_schedule_change(
+                                old_schedule_dict,
+                                schedule_dict,
+                                current_time_minutes=None  # Tomorrow = all slots are future
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to generate AI explanation for tomorrow: {e}")
+                            ai_explanation = None
+
+                # Send tomorrow's schedule with AI explanation if available
+                await self.send_schedule(for_tomorrow=True, change_detected=change_detected, change_explanation=ai_explanation)
 
                 # Save tomorrow's schedule data and hash (data first for consistency)
                 if schedule_dict:

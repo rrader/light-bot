@@ -207,3 +207,30 @@ class TestScheduleFormatterWithAI:
         # But should still have the schedule
         assert "Планові відключення:" in message
         assert "14:00 - 16:00" in message
+
+    def test_build_prompt_for_tomorrow_schedule(self):
+        """Test that prompt for tomorrow's schedule doesn't include current time"""
+        from light_bot.ai.ai_explainer import ScheduleChangeExplainer
+
+        explainer = ScheduleChangeExplainer(api_key="test-key", model="gpt-4o-mini")
+
+        old_schedule = {
+            "date": "2024-01-16",
+            "status": "ScheduleApplies",
+            "slots": [{"start": 480, "end": 600, "type": "Definite"}]
+        }
+
+        new_schedule = {
+            "date": "2024-01-16",
+            "status": "ScheduleApplies",
+            "slots": [{"start": 480, "end": 660, "type": "Definite"}]
+        }
+
+        # For tomorrow's schedule, pass None for current_time_minutes
+        prompt = explainer._build_prompt(old_schedule, new_schedule, current_time_minutes=None)
+
+        # Should say "ЗАВТРА" instead of current time
+        assert "ЗАВТРА" in prompt.upper()
+        assert "Поточний час:" not in prompt
+        assert "08:00-10:00" in prompt  # Old schedule
+        assert "08:00-11:00" in prompt  # New schedule
