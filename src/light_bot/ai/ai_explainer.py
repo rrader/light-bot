@@ -116,7 +116,6 @@ class ScheduleChangeExplainer:
                     {"role": "user", "content": prompt}
                 ],
                 max_completion_tokens=150,
-                temperature=0.7,
                 timeout=self.timeout
             )
 
