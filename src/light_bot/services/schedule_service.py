@@ -30,6 +30,9 @@ from light_bot.config import (
     LAST_CHECK_DATE_FILE,
     TOMORROW_SENT_DATE_FILE,
     LAST_WARNING_SENT_FILE,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    ENABLE_AI_EXPLANATIONS,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +60,18 @@ class ScheduleService:
         self._cache_lock = asyncio.Lock()
         self._cached_schedule: Optional[YasnoScheduleResponse] = None
         self._cache_timestamp: Optional[datetime] = None
+        # Initialize AI explainer if enabled and API key is available
+        self.ai_explainer = None
+        if ENABLE_AI_EXPLANATIONS and OPENAI_API_KEY:
+            try:
+                from light_bot.ai.ai_explainer import ScheduleChangeExplainer
+                self.ai_explainer = ScheduleChangeExplainer(OPENAI_API_KEY, OPENAI_MODEL)
+                logger.info(f"AI explanations enabled (model: {OPENAI_MODEL})")
+            except Exception as e:
+                logger.warning(f"Failed to initialize AI explainer: {e}")
+                self.ai_explainer = None
+        else:
+            logger.info("AI explanations disabled (no API key or disabled in config)")
 
     async def _get_cached_schedule(self) -> Optional[YasnoScheduleResponse]:
         """Get cached schedule if still valid, otherwise fetch new data
@@ -449,10 +464,15 @@ class ScheduleService:
             logger.error(f"Error computing schedule hash: {e}")
             return None
 
-    async def send_schedule(self, for_tomorrow: bool = False, change_detected: bool = False) -> bool:
+    async def send_schedule(self, for_tomorrow: bool = False, change_detected: bool = False, change_explanation: Optional[str] = None) -> bool:
         """Fetch and send schedule to Telegram channel
 
         Uses cached schedule data when available to avoid redundant API calls.
+
+        Args:
+            for_tomorrow: Whether to send tomorrow's or today's schedule
+            change_detected: Whether this is a schedule change notification
+            change_explanation: Optional AI-generated explanation of changes
         """
         try:
             logger.info(f"Fetching schedule (tomorrow={for_tomorrow})...")
@@ -476,7 +496,8 @@ class ScheduleService:
                 schedule_data,
                 self.group,
                 for_tomorrow=for_tomorrow,
-                change_detected=change_detected
+                change_detected=change_detected,
+                change_explanation=change_explanation
             )
 
             # Print the formatted message
@@ -773,7 +794,23 @@ class ScheduleService:
                 # Send notification only if changes are meaningful
                 if should_notify:
                     logger.info("Sending notification for meaningful schedule change")
-                    await self.send_schedule(for_tomorrow=False, change_detected=True)
+
+                    # Generate AI explanation if available
+                    ai_explanation = None
+                    if self.ai_explainer and old_schedule_dict:
+                        try:
+                            now = datetime.now(TIMEZONE)
+                            current_minutes = now.hour * 60 + now.minute
+                            ai_explanation = await self.ai_explainer.explain_schedule_change(
+                                old_schedule_dict,
+                                schedule_dict,
+                                current_minutes
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to generate AI explanation: {e}")
+                            ai_explanation = None
+
+                    await self.send_schedule(for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
                 else:
                     logger.info("Schedule changed but only in past slots - notification skipped")
 

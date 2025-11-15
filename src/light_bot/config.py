@@ -53,6 +53,11 @@ OUTAGE_WARNING_MINUTES = int(os.getenv('OUTAGE_WARNING_MINUTES', 30))  # Send wa
 OUTAGE_WARNING_CHECK_INTERVAL = int(os.getenv('OUTAGE_WARNING_CHECK_INTERVAL', 300))  # Check every 5 minutes
 LAST_WARNING_SENT_FILE = os.getenv('LAST_WARNING_SENT_FILE', 'last_warning_sent.txt')
 
+# OpenAI API Configuration (optional - for AI explanations of schedule changes)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # Optional: OpenAI API key
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-5-nano')  # OpenAI model for explanations
+ENABLE_AI_EXPLANATIONS = os.getenv('ENABLE_AI_EXPLANATIONS', 'true').lower() == 'true'  # Enable/disable AI explanations
+
 # Validate required environment variables
 if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")

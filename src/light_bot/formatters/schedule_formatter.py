@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 
 from light_bot.api.yasno import YasnoScheduleResponse, PowerSlot, SlotType
 from light_bot.config import TIMEZONE
@@ -41,9 +41,18 @@ class ScheduleFormatter:
         schedule_data: YasnoScheduleResponse,
         group: str,
         for_tomorrow: bool = False,
-        change_detected: bool = False
+        change_detected: bool = False,
+        change_explanation: Optional[str] = None
     ) -> str:
-        """Format complete schedule message for Telegram"""
+        """Format complete schedule message for Telegram
+
+        Args:
+            schedule_data: Schedule data from API
+            group: Power group number
+            for_tomorrow: Whether this is tomorrow's schedule
+            change_detected: Whether this is a change notification
+            change_explanation: Optional AI-generated explanation of changes
+        """
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
 
@@ -77,10 +86,16 @@ class ScheduleFormatter:
         if day_schedule.status == "WaitingForSchedule":
             status_msg = "⏳ Очікування підтвердження графіку\n\n"
 
+        # Add AI explanation if available
+        explanation_msg = ""
+        if change_detected and change_explanation:
+            explanation_msg = f"💡 <b>Що змінилося:</b>\n{change_explanation}\n\n"
+
         message = (
             f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
             f"🏠 Група: <b>{group}</b>\n"
             f"📅 {weekday}, {date_str}\n\n"
+            f"{explanation_msg}"
             f"{status_msg}"
             f"<b>Планові відключення:</b>\n"
             f"{outages_text}\n\n"
