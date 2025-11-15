@@ -115,7 +115,7 @@ class ScheduleChangeExplainer:
                     {"role": "system", "content": "Ти - помічник який пояснює зміни в графіках відключень електроенергії простою українською мовою."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=150,
+                max_completion_tokens=150,
                 temperature=0.7,
                 timeout=self.timeout
             )

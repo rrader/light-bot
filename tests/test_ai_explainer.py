@@ -103,7 +103,7 @@ class TestScheduleChangeExplainer:
         # Check API call parameters
         call_kwargs = explainer.client.chat.completions.create.call_args.kwargs
         assert call_kwargs['model'] == 'gpt-5-nano'
-        assert call_kwargs['max_tokens'] == 150
+        assert call_kwargs['max_completion_tokens'] == 150
         assert call_kwargs['timeout'] == 10.0
 
     @pytest.mark.asyncio
