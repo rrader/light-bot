@@ -61,11 +61,11 @@ class TestScheduleChangeExplainer:
         assert "12:00" in prompt  # Current time
         assert "08:00-10:00" in prompt  # Old schedule
         assert "08:00-11:00" in prompt  # New schedule
-        assert "українською" in prompt.lower()  # Language instruction
         assert "майбутн" in prompt.lower()  # Focus on future
         assert "емоджі" in prompt.lower()  # Emoji instruction
-        assert "🎉" in prompt or "😊" in prompt  # Good change emoji
-        assert "😞" in prompt or "😤" in prompt  # Bad change emoji
+        assert "коротко" in prompt.lower()  # Keep it short instruction
+        assert "🎉" in prompt  # Good change emoji
+        assert "😞" in prompt  # Bad change emoji
 
     @pytest.mark.asyncio
     async def test_explain_schedule_change_success(self, explainer):
