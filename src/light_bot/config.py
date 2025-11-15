@@ -18,8 +18,18 @@ API_TOKEN = os.getenv('API_TOKEN')
 
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
+
+# Schedule hash files: Used for change detection (fast comparison)
 LAST_SCHEDULE_TODAY_HASH_FILE = os.getenv('LAST_SCHEDULE_TODAY_HASH_FILE', 'last_schedule_today_hash.txt')
 LAST_SCHEDULE_TOMORROW_HASH_FILE = os.getenv('LAST_SCHEDULE_TOMORROW_HASH_FILE', 'last_schedule_tomorrow_hash.txt')
+
+# Schedule data files: Full schedule data (date, status, slots) in JSON format
+# Purpose: Store complete schedule history for future analysis and comparison features
+# Relationship: Paired with hash files - hash existence implies data file should exist
+# Format: JSON with fields: date (ISO), status (enum value), slots (array of {start, end, type})
+LAST_SCHEDULE_TODAY_DATA_FILE = os.getenv('LAST_SCHEDULE_TODAY_DATA_FILE', 'last_schedule_today_data.json')
+LAST_SCHEDULE_TOMORROW_DATA_FILE = os.getenv('LAST_SCHEDULE_TOMORROW_DATA_FILE', 'last_schedule_tomorrow_data.json')
+
 LAST_CHECK_DATE_FILE = os.getenv('LAST_CHECK_DATE_FILE', 'last_check_date.txt')
 TOMORROW_SENT_DATE_FILE = os.getenv('TOMORROW_SENT_DATE_FILE', 'tomorrow_sent_date.txt')
 

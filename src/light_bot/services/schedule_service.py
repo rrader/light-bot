@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import hashlib
+import json
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
@@ -24,6 +25,8 @@ from light_bot.config import (
     OUTAGE_WARNING_CHECK_INTERVAL,
     LAST_SCHEDULE_TODAY_HASH_FILE,
     LAST_SCHEDULE_TOMORROW_HASH_FILE,
+    LAST_SCHEDULE_TODAY_DATA_FILE,
+    LAST_SCHEDULE_TOMORROW_DATA_FILE,
     LAST_CHECK_DATE_FILE,
     TOMORROW_SENT_DATE_FILE,
     LAST_WARNING_SENT_FILE,
@@ -120,6 +123,40 @@ class ScheduleService:
             logger.info(f"Hash saved to {file_path}: {hash_value[:8]}...")
         except Exception as e:
             logger.error(f"Error writing hash file {file_path}: {e}")
+            raise
+
+    def _read_schedule_data_file(self, file_path: str) -> Optional[dict]:
+        """Read schedule data from JSON file
+
+        Returns:
+            Dict with schedule data or None if file doesn't exist or is invalid
+        """
+        try:
+            data_str = read_text(file_path)
+            if data_str:
+                return json.loads(data_str)
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing schedule data from {file_path}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error reading schedule data file {file_path}: {e}")
+            return None
+
+    def _write_schedule_data_file(self, file_path: str, schedule_data: dict) -> None:
+        """Write schedule data to JSON file atomically
+
+        Args:
+            file_path: Path to the JSON file
+            schedule_data: Dict containing schedule information (status, date, slots)
+        """
+        try:
+            # Convert to JSON with proper formatting
+            json_str = json.dumps(schedule_data, indent=2, default=str)
+            atomic_write_text(file_path, json_str)
+            logger.info(f"Schedule data saved to {file_path}")
+        except Exception as e:
+            logger.error(f"Error writing schedule data file {file_path}: {e}")
             raise
 
     def _read_last_check_date(self) -> Optional[datetime]:
@@ -300,6 +337,95 @@ class ScheduleService:
             logger.error(f"Error finding next outage: {e}")
             return None
 
+    def _serialize_day_schedule(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[dict]:
+        """Serialize DaySchedule to dict for JSON storage
+
+        Args:
+            schedule_data: Full schedule response from API
+            for_tomorrow: Whether to serialize tomorrow's or today's schedule
+
+        Returns:
+            Dict with schedule data or None if not available
+        """
+        try:
+            if not schedule_data:
+                return None
+
+            group_schedule = schedule_data.get_group(self.group)
+            if not group_schedule:
+                return None
+
+            day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
+
+            return {
+                "date": day_schedule.date.isoformat(),
+                "status": day_schedule.status.value if hasattr(day_schedule.status, 'value') else str(day_schedule.status),
+                "slots": [
+                    {
+                        "start": slot.start,
+                        "end": slot.end,
+                        "type": slot.type.value if hasattr(slot.type, 'value') else str(slot.type)
+                    }
+                    for slot in day_schedule.slots
+                ]
+            }
+        except Exception as e:
+            logger.error(f"Error serializing schedule data: {e}")
+            return None
+
+    def _has_meaningful_changes(self, old_schedule_dict: dict, new_schedule_dict: dict, current_time_minutes: int) -> bool:
+        """Check if schedule changes affect future or current time slots
+
+        Args:
+            old_schedule_dict: Previous schedule data (from JSON file)
+            new_schedule_dict: New schedule data (from API)
+            current_time_minutes: Current time in minutes since midnight (0-1439)
+
+        Returns:
+            True if there are changes in future/current slots or status changed,
+            False if only past slots changed
+        """
+        try:
+            # Status change is always meaningful (e.g., EmergencyShutdowns)
+            old_status = old_schedule_dict.get('status')
+            new_status = new_schedule_dict.get('status')
+            if old_status != new_status:
+                logger.info(f"Status changed from {old_status} to {new_status} - meaningful change")
+                return True
+
+            old_slots = old_schedule_dict.get('slots', [])
+            new_slots = new_schedule_dict.get('slots', [])
+
+            # Filter to only future/current slots (slots that haven't ended yet)
+            # A slot is relevant if its end time > current time
+            def is_future_or_current(slot: dict) -> bool:
+                return slot.get('end', 0) > current_time_minutes
+
+            old_future_slots = [s for s in old_slots if is_future_or_current(s)]
+            new_future_slots = [s for s in new_slots if is_future_or_current(s)]
+
+            # Convert to comparable format (sorted tuples)
+            def slot_to_tuple(slot: dict) -> tuple:
+                return (slot.get('start'), slot.get('end'), slot.get('type'))
+
+            old_future_set = set(slot_to_tuple(s) for s in old_future_slots)
+            new_future_set = set(slot_to_tuple(s) for s in new_future_slots)
+
+            # Check if future slots differ
+            if old_future_set != new_future_set:
+                logger.info(f"Future/current slots changed - meaningful change")
+                logger.debug(f"Old future slots: {old_future_set}")
+                logger.debug(f"New future slots: {new_future_set}")
+                return True
+
+            logger.info("Changes only in past slots - not meaningful")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking meaningful changes: {e}")
+            # On error, default to meaningful (safer to notify)
+            return True
+
     def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[str]:
         """Compute hash of schedule to detect changes (date-independent)"""
         try:
@@ -462,7 +588,7 @@ class ScheduleService:
                 await asyncio.sleep(OUTAGE_WARNING_CHECK_INTERVAL)
 
     def _perform_midnight_rollover(self) -> None:
-        """Perform midnight rollover: delete today's hash, promote tomorrow's hash to today's
+        """Perform midnight rollover: delete today's files, promote tomorrow's files to today's
 
         This method performs atomic file operations to ensure consistency.
         If any critical operation fails, an exception is raised to prevent
@@ -472,9 +598,12 @@ class ScheduleService:
             OSError: If critical file operations fail
         """
         try:
-            # Step 1: Delete today's hash file (yesterday is gone)
+            # Step 1: Delete today's hash and data files (yesterday is gone)
+            # Both are critical to prevent inconsistent state
             safe_remove(LAST_SCHEDULE_TODAY_HASH_FILE, critical=True)
             logger.info("Deleted today's hash file (yesterday)")
+            safe_remove(LAST_SCHEDULE_TODAY_DATA_FILE, critical=True)
+            logger.info("Deleted today's data file (yesterday)")
 
             # Step 2: Promote tomorrow's hash to today's hash
             if os.path.exists(LAST_SCHEDULE_TOMORROW_HASH_FILE):
@@ -489,12 +618,19 @@ class ScheduleService:
                 self.last_today_hash = None
                 self.last_tomorrow_hash = None
 
-            # Step 3: Clear tomorrow_sent_date (ready to send new tomorrow)
+            # Step 3: Promote tomorrow's data to today's data
+            if os.path.exists(LAST_SCHEDULE_TOMORROW_DATA_FILE):
+                safe_rename(LAST_SCHEDULE_TOMORROW_DATA_FILE, LAST_SCHEDULE_TODAY_DATA_FILE)
+                logger.info("Promoted tomorrow's data to today's data")
+            else:
+                logger.info("No tomorrow data to promote")
+
+            # Step 4: Clear tomorrow_sent_date (ready to send new tomorrow)
             safe_remove(TOMORROW_SENT_DATE_FILE, critical=False)
             logger.info("Cleared tomorrow sent date")
             self.tomorrow_sent_date = None
 
-            # Step 4: Invalidate schedule cache (new day = new data)
+            # Step 5: Invalidate schedule cache (new day = new data)
             self._invalidate_cache()
 
             logger.info("Midnight rollover completed successfully")
@@ -548,6 +684,11 @@ class ScheduleService:
                 logger.debug("Tomorrow's schedule unchanged")
                 return
 
+            # Serialize tomorrow's schedule data
+            schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=True)
+            if not schedule_dict:
+                logger.warning("Failed to serialize tomorrow's schedule data, data file will not be written")
+
             # Check if tomorrow's schedule is confirmed (not waiting)
             if tomorrow_schedule.status != "WaitingForSchedule":
                 logger.info(f"Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
@@ -556,7 +697,9 @@ class ScheduleService:
                 change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
                 await self.send_schedule(for_tomorrow=True, change_detected=change_detected)
 
-                # Save tomorrow's hash
+                # Save tomorrow's schedule data and hash (data first for consistency)
+                if schedule_dict:
+                    self._write_schedule_data_file(LAST_SCHEDULE_TOMORROW_DATA_FILE, schedule_dict)
                 self.last_tomorrow_hash = tomorrow_hash
                 self._write_hash_file(LAST_SCHEDULE_TOMORROW_HASH_FILE, tomorrow_hash)
                 logger.info(f"Saved tomorrow's hash: {tomorrow_hash[:8]}...")
@@ -596,20 +739,47 @@ class ScheduleService:
                 logger.warning("Could not compute today's schedule hash")
                 return
 
+            # Serialize current schedule data
+            schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=False)
+            if not schedule_dict:
+                logger.warning("Failed to serialize today's schedule data, data file will not be written")
+
             # Compare with last known hash
             if not self.last_today_hash:
                 # No hash file exists - send today's schedule (morning case)
                 logger.info("No today hash found - sending today's schedule")
                 await self.send_schedule(for_tomorrow=False, change_detected=False)
+                # Write data file first, then hash file (hash existence implies data exists)
+                if schedule_dict:
+                    self._write_schedule_data_file(LAST_SCHEDULE_TODAY_DATA_FILE, schedule_dict)
                 self.last_today_hash = current_hash
                 self._write_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE, current_hash)
             elif current_hash != self.last_today_hash:
                 logger.info(f"Today's schedule changed! Old: {self.last_today_hash[:8]}, New: {current_hash[:8]}")
 
-                # Send updated schedule with change flag
-                await self.send_schedule(for_tomorrow=False, change_detected=True)
+                # Check if changes are meaningful (affect future/current slots)
+                should_notify = True  # Default: always notify
+                old_schedule_dict = self._read_schedule_data_file(LAST_SCHEDULE_TODAY_DATA_FILE)
 
-                # Update stored hash
+                if old_schedule_dict and schedule_dict:
+                    # We have both old and new data - check if changes are meaningful
+                    now = datetime.now(TIMEZONE)
+                    current_minutes = now.hour * 60 + now.minute
+                    should_notify = self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
+                else:
+                    # If we don't have old data, always notify (first run or data missing)
+                    logger.info("No old schedule data available - will notify")
+
+                # Send notification only if changes are meaningful
+                if should_notify:
+                    logger.info("Sending notification for meaningful schedule change")
+                    await self.send_schedule(for_tomorrow=False, change_detected=True)
+                else:
+                    logger.info("Schedule changed but only in past slots - notification skipped")
+
+                # ALWAYS update stored schedule data and hash (regardless of notification)
+                if schedule_dict:
+                    self._write_schedule_data_file(LAST_SCHEDULE_TODAY_DATA_FILE, schedule_dict)
                 self.last_today_hash = current_hash
                 self._write_hash_file(LAST_SCHEDULE_TODAY_HASH_FILE, current_hash)
             else:
