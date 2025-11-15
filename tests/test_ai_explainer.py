@@ -63,6 +63,9 @@ class TestScheduleChangeExplainer:
         assert "08:00-11:00" in prompt  # New schedule
         assert "українською" in prompt.lower()  # Language instruction
         assert "майбутн" in prompt.lower()  # Focus on future
+        assert "емоджі" in prompt.lower()  # Emoji instruction
+        assert "🎉" in prompt or "😊" in prompt  # Good change emoji
+        assert "😞" in prompt or "😤" in prompt  # Bad change emoji
 
     @pytest.mark.asyncio
     async def test_explain_schedule_change_success(self, explainer):
@@ -83,16 +86,18 @@ class TestScheduleChangeExplainer:
             ]
         }
 
-        # Mock OpenAI response
+        # Mock OpenAI response with emoji
         mock_response = Mock()
         mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Вечірнє відключення подовжено на 2 години."
+        mock_response.choices[0].message.content = "😞 Вечірнє відключення подовжено на 2 години."
 
         explainer.client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         result = await explainer.explain_schedule_change(old_schedule, new_schedule, 720)
 
-        assert result == "Вечірнє відключення подовжено на 2 години."
+        assert result == "😞 Вечірнє відключення подовжено на 2 години."
+        # Should start with one of the emotional emojis
+        assert any(result.startswith(emoji) for emoji in ["🎉", "😊", "😞", "😤", "🤷", "📝"])
         explainer.client.chat.completions.create.assert_called_once()
 
         # Check API call parameters
@@ -150,7 +155,7 @@ class TestScheduleFormatterWithAI:
         schedule_data = YasnoScheduleResponse({"2.1": group_schedule.model_dump()})
 
         formatter = ScheduleFormatter()
-        ai_explanation = "Вечірнє відключення подовжено на 2 години."
+        ai_explanation = "😞 Вечірнє відключення подовжено на 2 години."
 
         message = formatter.format_schedule_message(
             schedule_data,
@@ -163,7 +168,7 @@ class TestScheduleFormatterWithAI:
         # Check AI explanation is present
         assert "💡" in message
         assert "Що змінилося:" in message
-        assert "Вечірнє відключення подовжено на 2 години." in message
+        assert "😞 Вечірнє відключення подовжено на 2 години." in message
 
         # Check it appears before outages list
         explanation_idx = message.index("Що змінилося:")
