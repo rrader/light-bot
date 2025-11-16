@@ -56,8 +56,8 @@ class ScheduleFormatter:
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
 
-        emoji = "🔔" if change_detected else "🌙" if for_tomorrow else "☀️"
-        day_label = "завтра" if for_tomorrow else "сьогодні" if not change_detected else "змінився"
+        # Determine day context
+        day_word = "завтра" if for_tomorrow else "сьогодні"
 
         group_schedule = schedule_data.get_group(group)
         if not group_schedule:
@@ -86,16 +86,24 @@ class ScheduleFormatter:
         if day_schedule.status == "WaitingForSchedule":
             status_msg = "⏳ Очікування підтвердження графіку\n\n"
 
-        # Add AI explanation if available
-        explanation_msg = ""
-        if change_detected and change_explanation:
-            explanation_msg = f"💡 <b>Що змінилося:</b>\n{change_explanation}\n\n"
+        # Set emoji and title based on change status
+        if change_detected:
+            emoji = "🔔"
+            # Add AI explanation inline after colon if available
+            if change_explanation:
+                # Ensure explanation starts with lowercase
+                explanation_text = change_explanation[0].lower() + change_explanation[1:] if change_explanation else ""
+                title = f"Графік на <b>{day_word}</b> змінився: {explanation_text}"
+            else:
+                title = f"Графік на <b>{day_word}</b> змінився"
+        else:
+            emoji = "🌙" if for_tomorrow else "☀️"
+            title = f"Графік відключень на <b>{day_word}</b>"
 
         message = (
-            f"{emoji} <b>Графік відключень {day_label.upper()}</b>\n\n"
+            f"{emoji} <b>{title}</b>\n\n"
             f"🏠 Група: <b>{group}</b>\n"
             f"📅 {weekday}, {date_str}\n\n"
-            f"{explanation_msg}"
             f"{status_msg}"
             f"<b>Планові відключення:</b>\n"
             f"{outages_text}\n\n"
