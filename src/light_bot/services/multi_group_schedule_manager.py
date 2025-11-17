@@ -71,7 +71,7 @@ class MultiGroupScheduleManager:
 
             self.group_senders[config.id] = GroupScheduleSender(
                 bot=bot,
-                channel_id=config.channel,
+                channel_id=config.target_channel,
                 group=config.group,
                 city=config.city,
                 formatter=formatter,

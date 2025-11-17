@@ -38,7 +38,7 @@ class GroupScheduleSender:
     def __init__(
         self,
         bot: Bot,
-        channel_id: str,
+        channel_id: str | int,
         group: str,
         city: str,
         formatter: ScheduleFormatter,
@@ -65,7 +65,7 @@ class GroupScheduleSender:
 
         Args:
             bot: Telegram Bot instance for sending messages
-            channel_id: Telegram channel ID to send messages to
+            channel_id: Telegram channel ID to send messages to (str like "@channel" or int like -123456)
             group: Yasno power group (e.g., "2.1")
             city: City name (e.g., "kiev", "lviv")
             formatter: ScheduleFormatter instance for message formatting

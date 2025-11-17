@@ -63,7 +63,7 @@ class ScheduleService:
 
         # Set default channel for configs that don't specify one
         for config in YASNO_GROUP_CONFIGS:
-            if not config.channel:
+            if not config.channel and not config.chat_id:
                 config.channel = TELEGRAM_SCHEDULE_CHANNEL_ID
 
         logger.info(f"Monitoring {len(YASNO_GROUP_CONFIGS)} group(s): {', '.join(str(c) for c in YASNO_GROUP_CONFIGS)}")

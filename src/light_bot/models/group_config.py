@@ -11,12 +11,14 @@ class GroupConfig:
         id: Unique identifier for this configuration (used in filenames)
         group: Yasno power group identifier (e.g., "2.1", "3.1")
         city: City name for the power grid (e.g., "kiev", "lviv", "odessa")
-        channel: Optional Telegram channel ID for notifications
+        channel: Optional Telegram channel username for public channels (e.g., "@power_po2")
+        chat_id: Optional Telegram chat ID for private channels (e.g., -3492454736)
     """
     id: str
     group: str
     city: str
     channel: Optional[str] = None
+    chat_id: Optional[int] = None
 
     def __post_init__(self):
         """Validate configuration after initialization"""
@@ -41,7 +43,21 @@ class GroupConfig:
         """
         return self.id.replace('.', '_').replace(' ', '_')
 
+    @property
+    def target_channel(self) -> Optional[str | int]:
+        """Get the target channel/chat for notifications
+
+        Returns:
+            chat_id if set (for private channels), otherwise channel (for public channels)
+        """
+        return self.chat_id if self.chat_id is not None else self.channel
+
     def __str__(self) -> str:
         """String representation for logging"""
-        channel_info = f", channel: {self.channel}" if self.channel else ""
+        if self.chat_id is not None:
+            channel_info = f", chat_id: {self.chat_id}"
+        elif self.channel:
+            channel_info = f", channel: {self.channel}"
+        else:
+            channel_info = ""
         return f"GroupConfig(id={self.id}, group={self.group}, city={self.city}{channel_info})"
