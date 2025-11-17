@@ -47,7 +47,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes) - both slots are in the past
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is False, "Changes in past slots should not be meaningful"
 
@@ -74,7 +74,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes) - slot is in the future
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Changes in future slots should be meaningful"
 
@@ -101,7 +101,7 @@ class TestScheduleChangeFiltering:
         # Current time: 15:00 (900 minutes) - we're in the middle of the slot
         current_minutes = 900
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Changes in current ongoing slot should be meaningful"
 
@@ -129,7 +129,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes)
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Adding new future slot should be meaningful"
 
@@ -157,7 +157,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes)
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Removing future slot should be meaningful"
 
@@ -185,7 +185,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes)
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is False, "Removing past slot should not be meaningful"
 
@@ -212,7 +212,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes) - slot is in the past
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Status change should always be meaningful"
 
@@ -241,7 +241,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes)
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Changes including future slots should be meaningful"
 
@@ -268,7 +268,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes)
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         assert result is True, "Type change in future slot should be meaningful"
 
@@ -285,7 +285,7 @@ class TestScheduleChangeFiltering:
 
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(schedule, schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(schedule, schedule, current_minutes)
 
         assert result is False, "Identical schedules should not be meaningful"
 
@@ -312,7 +312,7 @@ class TestScheduleChangeFiltering:
         # Current time: 12:00 (720 minutes) - exactly at slot end
         current_minutes = 720
 
-        result = schedule_service._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
+        result = schedule_service.group_sender._has_meaningful_changes(old_schedule, new_schedule, current_minutes)
 
         # Slot end=720 is NOT > current_time=720, so old slot is past
         # But new slot end=780 IS > current_time=720, so new slot is future
@@ -346,7 +346,7 @@ class TestScheduleChangeFiltering:
         current_minutes = 720
 
         # This is what check_today_schedule would call
-        should_notify = schedule_service._has_meaningful_changes(
+        should_notify = schedule_service.group_sender._has_meaningful_changes(
             old_schedule_dict,
             new_schedule_dict,
             current_minutes
@@ -382,7 +382,7 @@ class TestScheduleChangeFiltering:
         current_minutes = 720
 
         # This is what check_today_schedule would call
-        should_notify = schedule_service._has_meaningful_changes(
+        should_notify = schedule_service.group_sender._has_meaningful_changes(
             old_schedule_dict,
             new_schedule_dict,
             current_minutes
