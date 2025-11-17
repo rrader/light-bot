@@ -73,6 +73,7 @@ class MultiGroupScheduleManager:
                 bot=bot,
                 channel_id=config.channel,
                 group=config.group,
+                city=config.city,
                 formatter=formatter,
                 # State files with config ID suffix in data directory
                 today_hash_file=make_path(f"last_schedule_today_hash_{file_suffix}.txt"),

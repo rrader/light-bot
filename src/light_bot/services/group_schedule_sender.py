@@ -40,6 +40,7 @@ class GroupScheduleSender:
         bot: Bot,
         channel_id: str,
         group: str,
+        city: str,
         formatter: ScheduleFormatter,
         # State file paths
         today_hash_file: str,
@@ -66,6 +67,7 @@ class GroupScheduleSender:
             bot: Telegram Bot instance for sending messages
             channel_id: Telegram channel ID to send messages to
             group: Yasno power group (e.g., "2.1")
+            city: City name (e.g., "kiev", "lviv")
             formatter: ScheduleFormatter instance for message formatting
             today_hash_file: Path to file storing today's schedule hash
             tomorrow_hash_file: Path to file storing tomorrow's schedule hash
@@ -85,6 +87,7 @@ class GroupScheduleSender:
         self.bot = bot
         self.channel_id = channel_id
         self.group = group
+        self.city = city
         self.formatter = formatter
 
         # State file paths
@@ -428,6 +431,7 @@ class GroupScheduleSender:
             message = self.formatter.format_schedule_message(
                 schedule_data,
                 self.group,
+                city=self.city,
                 for_tomorrow=for_tomorrow,
                 change_detected=change_detected,
                 change_explanation=change_explanation
@@ -751,7 +755,8 @@ class GroupScheduleSender:
             message = self.formatter.format_outage_warning_message(
                 outage_start,
                 outage_end,
-                self.group
+                self.group,
+                self.city
             )
 
             await self.bot.send_message(
