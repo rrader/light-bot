@@ -61,7 +61,7 @@ try:
         group = item.get('group', '').strip()
         city = item.get('city', '').strip()
         channel = item.get('channel', '').strip() or None
-        chat_id = item.get('chat_id', '').strip() or None
+        chat_id = item.get('chat_id', '') or None
         if chat_id:
             chat_id = int(chat_id)
 
