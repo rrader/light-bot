@@ -76,6 +76,8 @@ try:
             channel=channel
         ))
 
+    print(YASNO_GROUP_CONFIGS)
+
     if not YASNO_GROUP_CONFIGS:
         raise ValueError("YASNO_GROUPS must contain at least one group configuration")
 

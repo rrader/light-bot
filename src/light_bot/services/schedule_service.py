@@ -61,11 +61,6 @@ class ScheduleService:
         else:
             logger.info("AI explanations disabled (no API key or disabled in config)")
 
-        # Set default channel for configs that don't specify one
-        for config in YASNO_GROUP_CONFIGS:
-            if not config.channel and not config.chat_id:
-                config.channel = TELEGRAM_SCHEDULE_CHANNEL_ID
-
         logger.info(f"Monitoring {len(YASNO_GROUP_CONFIGS)} group(s): {', '.join(str(c) for c in YASNO_GROUP_CONFIGS)}")
         self.multi_group_manager = MultiGroupScheduleManager(
             bot=self.bot,
