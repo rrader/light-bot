@@ -28,21 +28,36 @@ class ScheduleChangeExplainer:
             slots: List of slot dicts with start, end, type
 
         Returns:
-            Formatted string describing the slots
+            Formatted string describing the slots with durations
         """
         if not slots:
-            return "Відключень немає"
+            return "Відключень немає (0 годин без світла)"
 
         formatted = []
+        total_duration_minutes = 0
+
         for slot in slots:
             start_h = slot['start'] // 60
             start_m = slot['start'] % 60
             end_h = slot['end'] // 60
             end_m = slot['end'] % 60
             slot_type = slot['type']
-            formatted.append(f"{start_h:02d}:{start_m:02d}-{end_h:02d}:{end_m:02d} ({slot_type})")
 
-        return ", ".join(formatted)
+            # Calculate duration for this slot
+            duration_minutes = slot['end'] - slot['start']
+            total_duration_minutes += duration_minutes
+            duration_hours = duration_minutes / 60
+
+            # Format hours without unnecessary decimal for whole hours
+            hours_text = f"{duration_hours:.0f}г" if duration_hours == int(duration_hours) else f"{duration_hours:.1f}г"
+            formatted.append(f"{start_h:02d}:{start_m:02d}-{end_h:02d}:{end_m:02d} ({hours_text})")
+
+        # Format total duration
+        total_hours = total_duration_minutes / 60
+        total_text = f"{total_hours:.0f}г" if total_hours == int(total_hours) else f"{total_hours:.1f}г"
+        slots_text = ", ".join(formatted)
+
+        return f"{slots_text} | Всього: {total_text} без світла"
 
     def _build_prompt(self, old_schedule: dict, new_schedule: dict, current_time_minutes: Optional[int] = None) -> str:
         """Build the prompt for OpenAI API
@@ -69,8 +84,12 @@ class ScheduleChangeExplainer:
         prompt = f"""Ти - помічник який коротко пояснює зміни в графіку відключень світла.
 
 {time_context}
-Старий графік відключень (коли світла не буде): {old_slots_text}
-Новий графік відключень (коли світла не буде): {new_slots_text}
+
+ДУЖЕ ВАЖЛИВО - ЦЕ ГРАФІКИ ВІДКЛЮЧЕНЬ (коли світла НЕМАЄ):
+Старий графік: {old_slots_text} ← періоди БЕЗ світла
+Новий графік: {new_slots_text} ← періоди БЕЗ світла
+
+Запам'ятай: показані періоди = періоди ВІДКЛЮЧЕННЯ (без світла)!
 
 ВАЖЛИВО:
 - Пиши ДУЖЕ коротко (1-2 речення максимум!)
@@ -78,8 +97,8 @@ class ScheduleChangeExplainer:
 - {'Фокусуйся тільки на майбутніх відключеннях' if current_time_minutes is not None else 'Це графік на ЗАВТРА'}
 - Уникай слів "зміна полягає в тому що", "це означає", просто кажи що змінилось
 - Почни з емоджі:
-  🎉 - якщо менше відключень (добре)
-  😞 - якщо більше відключень (погано)
+  🎉 - якщо менше відключень або коротші (добре для людей)
+  😞 - якщо більше відключень або довші (погано для людей)
   🤷 - якщо просто перенесли час
 
 КОРИСНІ ФРАЗИ (використовуй для опису часу доби):
@@ -92,7 +111,7 @@ class ScheduleChangeExplainer:
 Приклади ГАРНИХ відповідей:{' (для сьогодні)' if current_time_minutes is not None else ' (для завтра)'}
 {"😞 Вечірнє відключення подовжили до 20:00 (було до 18:00)" if current_time_minutes is not None else "😞 Завтра вечірнє відключення подовжили до 20:00 (було до 18:00)"}
 {"🎉 Скоротили вечірнє відключення на годину!" if current_time_minutes is not None else "🎉 Завтра відключення скоротили на годину!"}
-{"🤷 Перенесли з ранку на обід: тепер 14:00-16:00" if current_time_minutes is not None else "🤷 Завтра перенесли з ранку на обід: 14:00-16:00"}
+{"🤷 Перенесли відключення з ранку на обід: тепер БЕЗ світла 14:00-16:00" if current_time_minutes is not None else "🤷 Завтра перенесли відключення з ранку на обід: 14:00-16:00"}
 {"😞 Додалось ранкове відключення 8:00-10:00" if current_time_minutes is not None else "😞 Завтра додалось ранкове відключення 8:00-10:00"}
 
 Приклади ПОГАНИХ відповідей:
@@ -127,7 +146,7 @@ class ScheduleChangeExplainer:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "Ти - помічник який пояснює зміни в графіках відключень електроенергії простою українською мовою."},
+                    {"role": "system", "content": "Ти - помічник який пояснює зміни в графіках відключень електроенергії простою українською мовою. ВАЖЛИВО: графіки показують періоди ВІДКЛЮЧЕННЯ (коли світла НЕМАЄ)!"},
                     {"role": "user", "content": prompt}
                 ],
                 max_completion_tokens=150,

@@ -113,8 +113,17 @@ class ScheduleFormatter:
             emoji = "🔔"
             # Add AI explanation inline after colon if available
             if change_explanation:
-                # Ensure explanation starts with lowercase
-                explanation_text = change_explanation[0].lower() + change_explanation[1:] if change_explanation else ""
+                # Ensure first letter (after any emojis/spaces) starts with lowercase
+                # Find the first alphabetic character and lowercase it
+                explanation_text = ""
+                first_letter_found = False
+                for i, char in enumerate(change_explanation):
+                    if not first_letter_found and char.isalpha():
+                        explanation_text += char.lower()
+                        first_letter_found = True
+                    else:
+                        explanation_text += char
+
                 title = f"Графік на <b>{day_word}</b> змінився: {explanation_text}"
             else:
                 title = f"Графік на <b>{day_word}</b> змінився"

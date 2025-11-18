@@ -18,22 +18,23 @@ class TestScheduleChangeExplainer:
         return ScheduleChangeExplainer(api_key="test-api-key", model="gpt-4o-mini")
 
     def test_format_slots_for_prompt_with_outages(self, explainer):
-        """Test formatting slots into readable text"""
+        """Test formatting slots into readable text with durations"""
         slots = [
-            {"start": 480, "end": 600, "type": "Definite"},   # 08:00-10:00
-            {"start": 840, "end": 960, "type": "Definite"}    # 14:00-16:00
+            {"start": 480, "end": 600, "type": "Definite"},   # 08:00-10:00 (2 hours)
+            {"start": 840, "end": 960, "type": "Definite"}    # 14:00-16:00 (2 hours)
         ]
 
         result = explainer._format_slots_for_prompt(slots)
 
         assert "08:00-10:00" in result
         assert "14:00-16:00" in result
-        assert "Definite" in result
+        assert "(2г)" in result  # Duration in hours (no decimal for whole hours)
+        assert "Всього: 4г без світла" in result  # Total 4 hours (no decimal)
 
     def test_format_slots_for_prompt_empty(self, explainer):
         """Test formatting empty slots"""
         result = explainer._format_slots_for_prompt([])
-        assert result == "Відключень немає"
+        assert result == "Відключень немає (0 годин без світла)"
 
     def test_build_prompt_structure(self, explainer):
         """Test that prompt contains all necessary information"""
@@ -165,13 +166,12 @@ class TestScheduleFormatterWithAI:
             change_explanation=ai_explanation
         )
 
-        # Check AI explanation is present
-        assert "💡" in message
-        assert "Що змінилося:" in message
-        assert "😞 Вечірнє відключення подовжено на 2 години." in message
+        # Check AI explanation is present inline in title
+        assert "змінився:" in message
+        assert "😞 вечірнє відключення подовжено на 2 години." in message
 
-        # Check it appears before outages list
-        explanation_idx = message.index("Що змінилося:")
+        # Check explanation appears before outages list
+        explanation_idx = message.index("😞")
         outages_idx = message.index("Планові відключення:")
         assert explanation_idx < outages_idx
 
