@@ -118,7 +118,7 @@ def find_next_outage_home() -> Optional[Tuple[str, str, bool]]:
             home_group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == 'home'), None)
             if home_group_config:
                 try:
-                    next_outage_info = find_next_outage(schedule_data, group)
+                    next_outage_info = find_next_outage(schedule_data, home_group_config.group)
                     if not next_outage_info:
                         return None
 
