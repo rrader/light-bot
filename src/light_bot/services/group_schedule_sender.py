@@ -12,6 +12,7 @@ from light_bot.api.yasno import YasnoScheduleResponse
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import TIMEZONE
+from light_bot.core.schedule_tools import find_next_outage, get_outage_slots, is_currently_in_outage
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +423,7 @@ class GroupScheduleSender:
             group_schedule = schedule_data.get_group(self.group)
             if group_schedule:
                 day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
-                outage_slots = self.formatter.get_outage_slots(day_schedule.slots)
+                outage_slots = get_outage_slots(day_schedule.slots)
                 logger.info(f"[{self.group}] Schedule: {len(outage_slots)} outage slots")
                 logger.info(f"[{self.group}] Date: {day_schedule.date}, Status: {day_schedule.status}")
             else:
@@ -631,123 +632,7 @@ class GroupScheduleSender:
 
     # ========== Outage Warning Methods ==========
 
-    def _create_outage_datetime(self, base_date: datetime, minutes: int) -> datetime:
-        """Create datetime from minutes since midnight, handling midnight boundary
 
-        Args:
-            base_date: The reference date to create time from
-            minutes: Minutes since midnight (can be >= MINUTES_PER_DAY for next day)
-
-        Returns:
-            datetime with proper date adjustment for midnight boundary
-        """
-        hour = minutes // 60
-        minute = minutes % 60
-
-        if hour >= HOURS_PER_DAY:
-            # Midnight boundary: move to next day
-            return base_date.replace(hour=0, minute=minute, second=0, microsecond=0) + timedelta(days=1)
-        else:
-            return base_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
-
-    def _is_continuous_outage(self, today_end_minutes: int, tomorrow_start_minutes: int) -> bool:
-        """Check if today's outage ending at midnight continues into tomorrow's outage
-
-        Args:
-            today_end_minutes: End time of today's slot in minutes (e.g., 1440 for 24:00)
-            tomorrow_start_minutes: Start time of tomorrow's slot in minutes (e.g., 0 for 00:00)
-
-        Returns:
-            True if outages are continuous across midnight (no gap between them)
-        """
-        return today_end_minutes >= MINUTES_PER_DAY and tomorrow_start_minutes == 0
-
-    def _is_currently_in_outage(self, schedule_data: YasnoScheduleResponse) -> bool:
-        """Check if we are currently in the middle of an outage
-
-        Returns:
-            True if current time falls within an active outage slot
-        """
-        try:
-            now = datetime.now(TIMEZONE)
-            current_minutes = now.hour * 60 + now.minute
-
-            group_schedule = schedule_data.get_group(self.group)
-            if not group_schedule:
-                return False
-
-            # Check today's schedule for current outage
-            today_schedule = group_schedule.today
-            outage_slots = self.formatter.get_outage_slots(today_schedule.slots)
-
-            for slot in outage_slots:
-                if slot.start <= current_minutes < slot.end:
-                    return True
-
-            return False
-
-        except Exception as e:
-            logger.error(f"[{self.group}] Error checking if currently in outage: {e}")
-            return False
-
-    def _find_next_outage(self, schedule_data: YasnoScheduleResponse) -> Optional[Tuple[datetime, datetime]]:
-        """Find the next scheduled outage (start time, end time)
-
-        Handles midnight boundary cases and continuous outages across midnight.
-
-        Returns:
-            Tuple of (outage_start_datetime, outage_end_datetime) or None if no upcoming outage
-        """
-        try:
-            now = datetime.now(TIMEZONE)
-            current_minutes = now.hour * 60 + now.minute
-
-            group_schedule = schedule_data.get_group(self.group)
-            if not group_schedule:
-                logger.warning(f"[{self.group}] Group not found in schedule")
-                return None
-
-            # Check today's schedule first
-            today_schedule = group_schedule.today
-            outage_slots = self.formatter.get_outage_slots(today_schedule.slots)
-
-            for slot in outage_slots:
-                if slot.start > current_minutes:
-                    # Found upcoming outage today
-                    start_time = self._create_outage_datetime(now, slot.start)
-
-                    # Check if this outage continues into tomorrow
-                    tomorrow_schedule = group_schedule.tomorrow
-                    tomorrow_outage_slots = self.formatter.get_outage_slots(tomorrow_schedule.slots)
-
-                    if (tomorrow_outage_slots and
-                        self._is_continuous_outage(slot.end, tomorrow_outage_slots[0].start)):
-                        # Continuous outage: use tomorrow's end time
-                        tomorrow = now + timedelta(days=1)
-                        end_time = self._create_outage_datetime(tomorrow, tomorrow_outage_slots[0].end)
-                        logger.info(f"[{self.group}] Detected continuous outage across midnight: {start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')}")
-                    else:
-                        # Regular outage: use today's end time
-                        end_time = self._create_outage_datetime(now, slot.end)
-
-                    return (start_time, end_time)
-
-            # Check tomorrow's schedule if no outage found today
-            tomorrow_schedule = group_schedule.tomorrow
-            tomorrow_outage_slots = self.formatter.get_outage_slots(tomorrow_schedule.slots)
-
-            if tomorrow_outage_slots:
-                slot = tomorrow_outage_slots[0]
-                tomorrow = now + timedelta(days=1)
-                start_time = self._create_outage_datetime(tomorrow, slot.start)
-                end_time = self._create_outage_datetime(tomorrow, slot.end)
-                return (start_time, end_time)
-
-            return None
-
-        except Exception as e:
-            logger.error(f"[{self.group}] Error finding next outage: {e}")
-            return None
 
     async def send_outage_warning(self, outage_start: datetime, outage_end: datetime) -> bool:
         """Send warning about upcoming power outage"""
@@ -786,12 +671,12 @@ class GroupScheduleSender:
             logger.debug(f"[{self.group}] Checking for upcoming outages...")
 
             # Skip warning if we're currently in an outage
-            if self._is_currently_in_outage(schedule_data):
+            if is_currently_in_outage(schedule_data, self.group):
                 logger.debug(f"[{self.group}] Currently in outage, skipping warning for next outage")
                 return
 
             # Find next outage
-            next_outage = self._find_next_outage(schedule_data)
+            next_outage = find_next_outage(schedule_data, self.group)
             if not next_outage:
                 logger.debug(f"[{self.group}] No upcoming outages found")
                 return

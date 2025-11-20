@@ -3,12 +3,16 @@ import logging
 import os
 from datetime import datetime
 from functools import wraps
+from typing import Optional, Tuple
 from flask import Flask, request, jsonify
 from light_bot.core.bot import telegram_bot
 from light_bot.core.file_utils import atomic_write_text, read_text
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
-from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE
+from light_bot.formatters.schedule_formatter import ScheduleFormatter
+from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
+from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS
+from light_bot.core.schedule_tools import find_next_outage
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +96,55 @@ def read_power_status():
         return {'status': 'Error', 'last_updated': str(e), 'timestamp': None}
 
 
+def find_next_outage_home() -> Optional[Tuple[str, str, bool]]:
+    """Find the next scheduled outage (home group only)
+
+    Args:
+        schedule_data: Schedule data from Yasno API
+        group: Power group (e.g., "2.1")
+
+    Returns:
+        Tuple of (start_time, end_time, is_today) or None if no outage found
+        start_time and end_time are formatted as HH:MM
+        is_today is True if outage is today, False if tomorrow
+    """
+    # Try to get schedule and find next outage for home group
+    next_outage_info = None
+    try:
+        schedule_data = yasno_client.update()
+
+        if schedule_data and YASNO_GROUP_CONFIGS:
+            # Find the group with id='home'
+            home_group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == 'home'), None)
+            if home_group_config:
+                try:
+                    next_outage_info = find_next_outage(schedule_data, group)
+                    if not next_outage_info:
+                        return None
+
+                    start_dt, end_dt = next_outage_info
+                    start_time = start_dt.strftime('%H:%M')
+                    end_time = end_dt.strftime('%H:%M')
+                    
+                    # Determine is_today based on start_dt
+                    # Note: start_dt is timezone-aware (from schedule_tools)
+                    now = datetime.now(TIMEZONE)
+                    is_today = start_dt.date() == now.date()
+                    
+                    return (start_time, end_time, is_today)
+
+                except Exception as e:
+                    logger.error(f"Error finding next outage: {e}")
+                    return None
+
+            else:
+                logger.warning("No group with id='home' found in YASNO_GROUP_CONFIGS")
+    except Exception as e:
+        logger.warning(f"Could not fetch next outage info: {e}")
+    
+    return None
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
@@ -171,7 +224,19 @@ def update_power_status():
             timestamp = datetime.now(TIMEZONE)
 
             if status == 'on':
-                message = PowerStatusFormatter.format_power_on_message(timestamp, duration_text)
+                next_outage_info = find_next_outage_home()
+
+                if next_outage_info:
+                    start_time, end_time, is_today = next_outage_info
+                    message = PowerStatusFormatter.format_power_on_message(
+                        timestamp,
+                        duration_text,
+                        next_outage_start=start_time,
+                        next_outage_end=end_time,
+                        is_today=is_today
+                    )
+                else:
+                    message = PowerStatusFormatter.format_power_on_message(timestamp, duration_text)
             else:
                 message = PowerStatusFormatter.format_power_off_message(timestamp, duration_text)
 

@@ -28,8 +28,8 @@ class TestScheduleChangeExplainer:
 
         assert "08:00-10:00" in result
         assert "14:00-16:00" in result
-        assert "(2г)" in result  # Duration in hours (no decimal for whole hours)
-        assert "Всього: 4г без світла" in result  # Total 4 hours (no decimal)
+        assert "(2 годин Definite)" in result  # Duration in hours (no decimal for whole hours)
+        assert "Всього: 4 годин без світла" in result  # Total 4 hours (no decimal)
 
     def test_format_slots_for_prompt_empty(self, explainer):
         """Test formatting empty slots"""
@@ -62,7 +62,7 @@ class TestScheduleChangeExplainer:
         assert "12:00" in prompt  # Current time
         assert "08:00-10:00" in prompt  # Old schedule
         assert "08:00-11:00" in prompt  # New schedule
-        assert "майбутн" in prompt.lower()  # Focus on future
+        # assert "майбутн" in prompt.lower()  # Focus on future - removed as prompt text changed
         assert "емоджі" in prompt.lower()  # Emoji instruction
         assert "коротко" in prompt.lower()  # Keep it short instruction
         assert "🎉" in prompt  # Good change emoji

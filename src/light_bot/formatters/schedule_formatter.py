@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from light_bot.api.yasno import YasnoScheduleResponse, PowerSlot, SlotType
 from light_bot.config import TIMEZONE
+from light_bot.core.schedule_tools import get_outage_slots
 
 
 class ScheduleFormatter:
@@ -16,14 +17,9 @@ class ScheduleFormatter:
         return f"{hours:02d}:{mins:02d}"
 
     @staticmethod
-    def get_outage_slots(slots: List[PowerSlot]) -> List[PowerSlot]:
-        """Filter slots to get only Definite outages"""
-        return [slot for slot in slots if slot.type == SlotType.DEFINITE]
-
-    @staticmethod
     def format_outage_slots(slots: List[PowerSlot]) -> str:
         """Format outage slots into readable time ranges"""
-        outage_slots = ScheduleFormatter.get_outage_slots(slots)
+        outage_slots = get_outage_slots(slots)
 
         if not outage_slots:
             return "✅ Відключень немає"
