@@ -27,7 +27,6 @@ class PowerStatusFormatter:
 
         message = (
             "⚡️ <b>Світло з'явилось!</b> ⚡️\n\n"
-            "✅ Електропостачання відновлено\n"
             f"🕐 Час: {kyiv_time}\n"
         )
 
@@ -37,8 +36,6 @@ class PowerStatusFormatter:
         if next_outage_start and next_outage_end:
             day_text = "сьогодні" if is_today else "завтра"
             message += f"\n⚠️ Наступне відключення {day_text}: <b>{next_outage_start} - {next_outage_end}</b>"
-        else:
-            message += "\n🏠 Можна користуватись побутовими приладами"
 
         return message
 
@@ -55,7 +52,6 @@ class PowerStatusFormatter:
 
         message = (
             "🔴 <b>Світло зникло</b> 🔴\n\n"
-            "❌ Електропостачання відсутнє\n"
             f"🕐 Час: {kyiv_time}\n"
         )
 

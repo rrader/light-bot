@@ -94,7 +94,8 @@ class ScheduleFormatter:
                 f"🏠 Група: <b>{group}</b> ({city_name})\n"
                 f"📅 {weekday}, {date_str}\n\n"
                 f"⚠️ <b>Графіки не застосовуються</b>\n\n"
-                f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+                f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
+                f"🤖 @power_po2"
             )
             return message
 
@@ -134,7 +135,8 @@ class ScheduleFormatter:
             f"{status_msg}"
             f"<b>Планові відключення:</b>\n"
             f"{outages_text}\n\n"
-            f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}"
+            f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
+            f"🤖 @power_po2"
         )
 
         return message
@@ -160,7 +162,8 @@ class ScheduleFormatter:
             f"<b>Час відключення:</b> {start_str}\n"
             f"<b>Заплановане включення:</b> {end_str}\n\n"
             f"⚡️ З обережністю користуйтесь ліфтами та зарядіть пристрої\n\n"
-            f"🕐 Надіслано: {now.strftime('%H:%M:%S')}"
+            f"🕐 Надіслано: {now.strftime('%H:%M:%S')}\n\n"
+            f"🤖 @power_po2"
         )
 
         return message
