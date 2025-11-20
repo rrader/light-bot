@@ -511,19 +511,22 @@ class GroupScheduleSender:
                 if should_notify:
                     logger.info(f"[{self.group}] Sending notification for meaningful schedule change")
 
-                    # Generate AI explanation if available
+                    # Generate explanation if available
                     ai_explanation = None
                     if self.ai_explainer and old_schedule_dict:
-                        try:
-                            now = datetime.now(TIMEZONE)
-                            current_minutes = now.hour * 60 + now.minute
-                            ai_explanation = await self.ai_explainer.explain_schedule_change(
-                                old_schedule_dict,
-                                schedule_dict,
-                                current_minutes
-                            )
-                        except Exception as e:
-                            logger.warning(f"[{self.group}] Failed to generate AI explanation: {e}")
+                        if old_schedule_dict.get("status") == "EmergencyShutdowns" and schedule_dict.get("status") != "EmergencyShutdowns":
+                            ai_explanation = "Екстренні відключення були скасовані"
+                        else:
+                            try:
+                                now = datetime.now(TIMEZONE)
+                                current_minutes = now.hour * 60 + now.minute
+                                ai_explanation = await self.ai_explainer.explain_schedule_change(
+                                    old_schedule_dict,
+                                    schedule_dict,
+                                    current_minutes
+                                )
+                            except Exception as e:
+                                logger.warning(f"[{self.group}] Failed to generate AI explanation: {e}")
                             ai_explanation = None
 
                     await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
@@ -599,16 +602,19 @@ class GroupScheduleSender:
                 if change_detected and self.ai_explainer and schedule_dict:
                     old_schedule_dict = self._read_schedule_data_file(self.tomorrow_data_file)
                     if old_schedule_dict:
-                        try:
-                            # For tomorrow's schedule, don't pass current_time_minutes
-                            ai_explanation = await self.ai_explainer.explain_schedule_change(
-                                old_schedule_dict,
-                                schedule_dict,
-                                current_time_minutes=None
-                            )
-                        except Exception as e:
-                            logger.warning(f"[{self.group}] Failed to generate AI explanation for tomorrow: {e}")
-                            ai_explanation = None
+                        if old_schedule_dict.get("status") == "EmergencyShutdowns" and schedule_dict.get("status") != "EmergencyShutdowns":
+                            ai_explanation = "Екстренні відключення були скасовані"
+                        else:
+                            try:
+                                # For tomorrow's schedule, don't pass current_time_minutes
+                                ai_explanation = await self.ai_explainer.explain_schedule_change(
+                                    old_schedule_dict,
+                                    schedule_dict,
+                                    current_time_minutes=None
+                                )
+                            except Exception as e:
+                                logger.warning(f"[{self.group}] Failed to generate AI explanation for tomorrow: {e}")
+                                ai_explanation = None
 
                 # Send tomorrow's schedule
                 await self.send_schedule(schedule_data, for_tomorrow=True, change_detected=change_detected, change_explanation=ai_explanation)
