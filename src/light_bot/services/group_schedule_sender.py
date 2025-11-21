@@ -525,7 +525,6 @@ class GroupScheduleSender:
                                 )
                             except Exception as e:
                                 logger.warning(f"[{self.group}] Failed to generate AI explanation: {e}")
-                            ai_explanation = None
                 else:
                     ai_explanation = "¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
 
