@@ -22,6 +22,7 @@ API_TOKEN = os.getenv('API_TOKEN')
 
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
+DB_PATH = os.getenv('DB_PATH', 'light_bot.db')
 
 # Data Directory Configuration
 # Directory for schedule state files (default: current directory)

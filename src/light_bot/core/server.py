@@ -11,12 +11,16 @@ from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
-from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS
+from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH
 from light_bot.core.schedule_tools import find_next_outage
+from light_bot.services.stats_service import StatsService
+from light_bot.core.stats_blueprint import create_stats_blueprint
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+stats_service = StatsService(DB_PATH)
+app.register_blueprint(create_stats_blueprint(stats_service))
 
 _loop = None
 
@@ -217,6 +221,9 @@ def update_power_status():
         if status_changed:
             if not write_power_status(status):
                 return jsonify({'error': 'Failed to write status to file'}), 500
+            
+            # Record event in DB
+            stats_service.record_event(status, datetime.now(TIMEZONE))
 
         # Only send notification if status changed
         notification_sent = False
