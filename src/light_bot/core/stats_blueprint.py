@@ -12,10 +12,16 @@ def create_stats_blueprint(stats_service: StatsService):
         
         return render_template(
             'stats.html',
-            total_outages=stats.get('total_outages', 0),
-            total_duration=DurationFormatter.format_duration(stats.get('total_outage_duration')),
-            last_24h_duration=DurationFormatter.format_duration(stats.get('last_24h_outage_duration')),
-            recent_events=recent_events
+            stats=stats,
+            recent_events=recent_events,
+            DurationFormatter=DurationFormatter
         )
+
+    @bp.route('/history')
+    def history():
+        from flask import request, jsonify
+        days = int(request.args.get('days', 30))
+        history_data = stats_service.get_daily_history(days)
+        return jsonify(history_data)
 
     return bp
