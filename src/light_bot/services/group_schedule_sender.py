@@ -503,14 +503,12 @@ class GroupScheduleSender:
                 if old_schedule_dict and schedule_dict:
                     now = datetime.now(TIMEZONE)
                     current_minutes = now.hour * 60 + now.minute
-                    should_notify = self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
+                    is_meaningful = self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
                 else:
                     logger.info(f"[{self.group}] No old schedule data available - will notify")
 
                 # Send notification only if changes are meaningful
-                if should_notify:
-                    logger.info(f"[{self.group}] Sending notification for meaningful schedule change")
-
+                if is_meaningful:
                     # Generate explanation if available
                     ai_explanation = None
                     if self.ai_explainer and old_schedule_dict:
@@ -528,10 +526,10 @@ class GroupScheduleSender:
                             except Exception as e:
                                 logger.warning(f"[{self.group}] Failed to generate AI explanation: {e}")
                             ai_explanation = None
-
-                    await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
                 else:
-                    logger.info(f"[{self.group}] Schedule changed but only in past slots - notification skipped")
+                    ai_explanation = "¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
+
+                await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
 
                 # ALWAYS update stored schedule data and hash
                 if schedule_dict:
