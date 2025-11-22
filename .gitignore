@@ -49,3 +49,9 @@ htmlcov/
 # Docker
 *.pid
 *.sock
+
+# gemini-cli settings
+.gemini/
+
+# GitHub App credentials
+gha-creds-*.json
