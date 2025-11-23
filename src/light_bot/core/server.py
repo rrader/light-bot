@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from functools import wraps
 from typing import Optional, Tuple
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from light_bot.core.bot import telegram_bot
 from light_bot.core.file_utils import atomic_write_text, read_text
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
@@ -15,12 +15,15 @@ from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GR
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
 from light_bot.core.stats_blueprint import create_stats_blueprint
+from light_bot.core.schedule_history_blueprint import create_schedule_history_blueprint
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 stats_service = StatsService(DB_PATH)
 app.register_blueprint(create_stats_blueprint(stats_service))
+app.register_blueprint(create_schedule_history_blueprint(stats_service), url_prefix='/api')
+
 
 _loop = None
 
@@ -280,6 +283,16 @@ def get_power_status():
     except Exception as e:
         logger.error(f"Error getting power status: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/schedule-history/<group_id>', methods=['GET'])
+def schedule_history(group_id: str):
+    """Render schedule history for a group"""
+    try:
+        history = stats_service.get_schedule_history(group_id)
+        return render_template('schedule_history.html', history=history, group_id=group_id)
+    except Exception as e:
+        logger.error(f"Error getting schedule history: {e}")
+        return "Error", 500
 
 
 def run_server(port=5000):
