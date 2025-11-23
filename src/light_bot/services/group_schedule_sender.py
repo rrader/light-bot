@@ -545,6 +545,7 @@ class GroupScheduleSender:
 
     async def check_tomorrow_schedule(self, schedule_data: YasnoScheduleResponse) -> None:
         """Check if tomorrow's schedule is ready and send it
+
         Args:
             schedule_data: Schedule data from API (should be pre-fetched/cached)
         """
@@ -570,12 +571,6 @@ class GroupScheduleSender:
                 return
 
             tomorrow_schedule = group_schedule.tomorrow
-
-            # Check if tomorrow's schedule is confirmed (not waiting)
-            if tomorrow_schedule.status == "WaitingForSchedule" or not tomorrow_schedule.slots:
-                logger.info(f"[{self.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status}, slots: {len(tomorrow_schedule.slots)})")
-                return
-
             tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
 
             if not tomorrow_hash:
@@ -591,46 +586,49 @@ class GroupScheduleSender:
             schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=True)
             if not schedule_dict:
                 logger.warning(f"[{self.group}] Failed to serialize tomorrow's schedule data")
-                return
 
-            logger.info(f"[{self.group}] Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
+            # Check if tomorrow's schedule is confirmed (not waiting)
+            if tomorrow_schedule.status != "WaitingForSchedule":
+                logger.info(f"[{self.group}] Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
 
-            # Check if this is a change (not first time)
-            change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
+                # Check if this is a change (not first time)
+                change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
 
-            # Generate AI explanation if this is a change
-            ai_explanation = None
-            if change_detected and self.ai_explainer and schedule_dict:
-                old_schedule_dict = self._read_schedule_data_file(self.tomorrow_data_file)
-                if old_schedule_dict:
-                    if old_schedule_dict.get("status") == "EmergencyShutdowns" and schedule_dict.get("status") != "EmergencyShutdowns":
-                        ai_explanation = "Екстренні відключення були скасовані"
-                    else:
-                        try:
-                            # For tomorrow's schedule, don't pass current_time_minutes
-                            ai_explanation = await self.ai_explainer.explain_schedule_change(
-                                old_schedule_dict,
-                                schedule_dict,
-                                current_time_minutes=None
-                            )
-                        except Exception as e:
-                            logger.warning(f"[{self.group}] Failed to generate AI explanation for tomorrow: {e}")
-                            ai_explanation = None
+                # Generate AI explanation if this is a change
+                ai_explanation = None
+                if change_detected and self.ai_explainer and schedule_dict:
+                    old_schedule_dict = self._read_schedule_data_file(self.tomorrow_data_file)
+                    if old_schedule_dict:
+                        if old_schedule_dict.get("status") == "EmergencyShutdowns" and schedule_dict.get("status") != "EmergencyShutdowns":
+                            ai_explanation = "Екстренні відключення були скасовані"
+                        else:
+                            try:
+                                # For tomorrow's schedule, don't pass current_time_minutes
+                                ai_explanation = await self.ai_explainer.explain_schedule_change(
+                                    old_schedule_dict,
+                                    schedule_dict,
+                                    current_time_minutes=None
+                                )
+                            except Exception as e:
+                                logger.warning(f"[{self.group}] Failed to generate AI explanation for tomorrow: {e}")
+                                ai_explanation = None
 
-            # Send tomorrow's schedule
-            await self.send_schedule(schedule_data, for_tomorrow=True, change_detected=change_detected, change_explanation=ai_explanation)
+                # Send tomorrow's schedule
+                await self.send_schedule(schedule_data, for_tomorrow=True, change_detected=change_detected, change_explanation=ai_explanation)
 
-            # Save tomorrow's schedule data and hash
-            if schedule_dict:
-                self._write_schedule_data_file(self.tomorrow_data_file, schedule_dict)
-            self.last_tomorrow_hash = tomorrow_hash
-            self._write_hash_file(self.tomorrow_hash_file, tomorrow_hash)
-            logger.info(f"[{self.group}] Saved tomorrow's hash: {tomorrow_hash[:8]}...")
+                # Save tomorrow's schedule data and hash
+                if schedule_dict:
+                    self._write_schedule_data_file(self.tomorrow_data_file, schedule_dict)
+                self.last_tomorrow_hash = tomorrow_hash
+                self._write_hash_file(self.tomorrow_hash_file, tomorrow_hash)
+                logger.info(f"[{self.group}] Saved tomorrow's hash: {tomorrow_hash[:8]}...")
 
-            # Mark that we sent tomorrow's schedule today
-            self.tomorrow_sent_date = current_date
-            self._write_tomorrow_sent_date(current_date)
-            logger.info(f"[{self.group}] Tomorrow's schedule sent and marked for date: {current_date}")
+                # Mark that we sent tomorrow's schedule today
+                self.tomorrow_sent_date = current_date
+                self._write_tomorrow_sent_date(current_date)
+                logger.info(f"[{self.group}] Tomorrow's schedule sent and marked for date: {current_date}")
+            else:
+                logger.debug(f"[{self.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
 
         except Exception as e:
             logger.error(f"[{self.group}] Error checking tomorrow's schedule: {e}")
@@ -725,8 +723,8 @@ class GroupScheduleSender:
 
     # ========== Main Loop ==========
 
-    async def run_checks(self, schedule_data: YasnoScheduleResponse) -> None:
-        """Run all checks: rollover, today, tomorrow, warnings
+    async def run_once(self, schedule_data: YasnoScheduleResponse) -> None:
+        """Run one iteration of schedule checking and warning logic
 
         Args:
             schedule_data: Schedule data from API (should be pre-fetched/cached)
@@ -734,24 +732,22 @@ class GroupScheduleSender:
         try:
             current_date = datetime.now(TIMEZONE).date()
 
-            # 1. Check for midnight rollover
+            # Perform midnight rollover if needed
             self.check_and_perform_rollover(current_date)
 
-            # 2. Check today's schedule
+            # Check today's schedule for changes
             await self.check_today_schedule(schedule_data)
 
-            # 3. Check tomorrow's schedule
+            # Check tomorrow's schedule for readiness
             await self.check_tomorrow_schedule(schedule_data)
 
-            # 4. Check for outage warnings
+            # Check for upcoming outage warnings
             await self.check_outage_warnings(schedule_data)
 
-            # 5. Update last check date
+            # Update last check date
             self.update_last_check_date(current_date)
 
-            logger.info(f"[{self.group}] All checks completed")
-
         except Exception as e:
-            logger.critical(f"[{self.group}] Unhandled error in run_checks: {e}")
-            # Consider adding a backoff or circuit breaker here
-            await asyncio.sleep(60)  # Wait a bit before next run on critical error
+            logger.critical(f"[{self.group}] Critical error in run_once: {e}")
+            # Consider adding a backoff or alert mechanism here
+            await asyncio.sleep(60)  # Wait a bit before retrying
