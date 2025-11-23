@@ -7,6 +7,7 @@ from telegram import Bot
 from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.services.multi_group_schedule_manager import MultiGroupScheduleManager
+from light_bot.services.stats_service import StatsService
 from light_bot.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
@@ -38,10 +39,11 @@ class ScheduleService:
     Supports monitoring single or multiple groups via YASNO_GROUPS configuration.
     """
 
-    def __init__(self):
+    def __init__(self, stats_service: StatsService):
         self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
         self.formatter = ScheduleFormatter()
         self.monitoring = False
+        self.stats_service = stats_service
 
         # Schedule data cache with thread safety
         self._cache_lock = asyncio.Lock()
@@ -104,6 +106,13 @@ class ScheduleService:
                 self._cached_schedule = schedule_data
                 self._cache_timestamp = now
                 logger.debug("Schedule cache updated")
+                for group_config in YASNO_GROUP_CONFIGS:
+                    if group_config.id == "home":
+                        self.stats_service.record_schedule_history(
+                            group_id=group_config.id,
+                            schedule_text=schedule_data.model_dump_json(),
+                            timestamp=now,
+                        )
             else:
                 logger.warning("Failed to fetch schedule data, cache invalidated")
                 self._cached_schedule = None
@@ -221,4 +230,10 @@ class ScheduleService:
 
 
 # Global service instance
-schedule_service = ScheduleService()
+schedule_service: Optional[ScheduleService] = None
+
+def get_schedule_service(stats_service: StatsService) -> ScheduleService:
+    global schedule_service
+    if schedule_service is None:
+        schedule_service = ScheduleService(stats_service)
+    return schedule_service
