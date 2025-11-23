@@ -2,8 +2,9 @@ import logging
 import threading
 import asyncio
 from light_bot.core.server import run_server
-from light_bot.config import FLASK_PORT
-from light_bot.services.schedule_service import schedule_service
+from light_bot.config import FLASK_PORT, DB_PATH
+from light_bot.services.stats_service import StatsService
+from light_bot.services.schedule_service import get_schedule_service
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -14,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 def run_schedule_monitoring():
     """Run schedule monitoring and outage warnings in dedicated event loop"""
+    stats_service = StatsService(db_path=DB_PATH)
+    schedule_service = get_schedule_service(stats_service)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -44,6 +47,10 @@ def main():
         flask_thread.join()
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+        # This is a bit of a hack, but it's the easiest way to stop the monitoring
+        # without a major refactor.
+        stats_service = StatsService(db_path=DB_PATH)
+        schedule_service = get_schedule_service(stats_service)
         schedule_service.stop_monitoring()
 
 
