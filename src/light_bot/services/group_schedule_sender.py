@@ -572,8 +572,8 @@ class GroupScheduleSender:
             tomorrow_schedule = group_schedule.tomorrow
 
             # Check if tomorrow's schedule is confirmed (not waiting)
-            if tomorrow_schedule.status == "WaitingForSchedule":
-                logger.info(f"[{self.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
+            if tomorrow_schedule.status == "WaitingForSchedule" or not tomorrow_schedule.slots:
+                logger.info(f"[{self.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status}, slots: {len(tomorrow_schedule.slots)})")
                 return
 
             tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
