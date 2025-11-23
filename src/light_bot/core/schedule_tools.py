@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple, List
 
 from light_bot.api.yasno import YasnoScheduleResponse, PowerSlot, SlotType
+from light_bot.api.yasno.models import ScheduleStatus
 from light_bot.config import TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
 
                 # Check if this outage continues into tomorrow
                 tomorrow_schedule = group_schedule.tomorrow
+                if tomorrow_schedule.status == ScheduleStatus.WAITING_FOR_SCHEDULE:
+                    end_time = create_outage_datetime(now, slot.end)
+                    return (start_time, end_time)
+
                 tomorrow_outage_slots = get_outage_slots(tomorrow_schedule.slots)
 
                 if (tomorrow_outage_slots and
@@ -101,14 +106,15 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
 
         # Check tomorrow's schedule if no outage found today
         tomorrow_schedule = group_schedule.tomorrow
-        tomorrow_outage_slots = get_outage_slots(tomorrow_schedule.slots)
+        if tomorrow_schedule.status != ScheduleStatus.WAITING_FOR_SCHEDULE:
+            tomorrow_outage_slots = get_outage_slots(tomorrow_schedule.slots)
 
-        if tomorrow_outage_slots:
-            slot = tomorrow_outage_slots[0]
-            tomorrow = now + timedelta(days=1)
-            start_time = create_outage_datetime(tomorrow, slot.start)
-            end_time = create_outage_datetime(tomorrow, slot.end)
-            return (start_time, end_time)
+            if tomorrow_outage_slots:
+                slot = tomorrow_outage_slots[0]
+                tomorrow = now + timedelta(days=1)
+                start_time = create_outage_datetime(tomorrow, slot.start)
+                end_time = create_outage_datetime(tomorrow, slot.end)
+                return (start_time, end_time)
 
         return None
 
@@ -117,7 +123,7 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
         return None
 
 
-def is_currently_in_outage(schedule_data: YasnoScheduleResponse, group: str) -> bool:
+def is_currently_in_outage(.schedule_data: YasnoScheduleResponse, group: str) -> bool:
     """Check if the group is currently in the middle of an outage
 
     Args:
