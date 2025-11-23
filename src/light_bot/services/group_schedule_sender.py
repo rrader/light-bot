@@ -719,3 +719,35 @@ class GroupScheduleSender:
         """
         self.last_check_date = current_date
         self._write_last_check_date(current_date)
+        logger.debug(f"[{self.group}] Updated last check date to {current_date}")
+
+    # ========== Main Loop ==========
+
+    async def run_once(self, schedule_data: YasnoScheduleResponse) -> None:
+        """Run one iteration of schedule checking and warning logic
+
+        Args:
+            schedule_data: Schedule data from API (should be pre-fetched/cached)
+        """
+        try:
+            current_date = datetime.now(TIMEZONE).date()
+
+            # Perform midnight rollover if needed
+            self.check_and_perform_rollover(current_date)
+
+            # Check today's schedule for changes
+            await self.check_today_schedule(schedule_data)
+
+            # Check tomorrow's schedule for readiness
+            await self.check_tomorrow_schedule(schedule_data)
+
+            # Check for upcoming outage warnings
+            await self.check_outage_warnings(schedule_data)
+
+            # Update last check date
+            self.update_last_check_date(current_date)
+
+        except Exception as e:
+            logger.critical(f"[{self.group}] Critical error in run_once: {e}")
+            # Consider adding a backoff or alert mechanism here
+            await asyncio.sleep(60)  # Wait a bit before retrying
