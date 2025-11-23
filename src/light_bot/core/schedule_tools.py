@@ -123,7 +123,7 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
         return None
 
 
-def is_currently_in_outage(.schedule_data: YasnoScheduleResponse, group: str) -> bool:
+def is_currently_in_outage(schedule_data: YasnoScheduleResponse, group: str) -> bool:
     """Check if the group is currently in the middle of an outage
 
     Args:
