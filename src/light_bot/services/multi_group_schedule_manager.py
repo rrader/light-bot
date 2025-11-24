@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional
 from telegram import Bot
 
 from light_bot.api.yasno import YasnoScheduleResponse
@@ -7,6 +7,7 @@ from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.models.group_config import GroupConfig
 from light_bot.services.group_schedule_sender import GroupScheduleSender
 from light_bot.services.file_migrator import FileMigrator
+from light_bot.services.stats_service import StatsService
 from light_bot.config import (
     SCHEDULE_TODAY_START_HOUR,
     SCHEDULE_TODAY_END_HOUR,
@@ -38,6 +39,7 @@ class MultiGroupScheduleManager:
         formatter: ScheduleFormatter,
         group_configs: List[GroupConfig],
         ai_explainer=None,
+        stats_service: Optional[StatsService] = None,
     ):
         """Initialize MultiGroupScheduleManager
 
@@ -46,11 +48,13 @@ class MultiGroupScheduleManager:
             formatter: ScheduleFormatter instance for message formatting
             group_configs: List of GroupConfig objects defining groups to monitor
             ai_explainer: Optional ScheduleChangeExplainer instance
+            stats_service: Optional StatsService instance for recording history
         """
         self.bot = bot
         self.formatter = formatter
         self.group_configs = group_configs
         self.ai_explainer = ai_explainer
+        self.stats_service = stats_service
 
         # Migrate old state files to first group (for backward compatibility)
         # This ensures smooth upgrade from single-group to multi-group mode
@@ -75,6 +79,7 @@ class MultiGroupScheduleManager:
                 group=config.group,
                 city=config.city,
                 formatter=formatter,
+                stats_service=self.stats_service,
                 # State files with config ID suffix in data directory
                 today_hash_file=make_path(f"last_schedule_today_hash_{file_suffix}.txt"),
                 tomorrow_hash_file=make_path(f"last_schedule_tomorrow_hash_{file_suffix}.txt"),
