@@ -50,4 +50,8 @@ htmlcov/
 *.pid
 *.sock
 
-data
+# gemini-cli settings
+.gemini/
+
+# GitHub App credentials
+gha-creds-*.json

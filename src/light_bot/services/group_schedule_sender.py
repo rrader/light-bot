@@ -13,6 +13,8 @@ from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import TIMEZONE
 from light_bot.core.schedule_tools import find_next_outage, get_outage_slots, is_currently_in_outage
+from light_bot.models.group_config import GroupConfig
+from light_bot.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +42,7 @@ class GroupScheduleSender:
         self,
         bot: Bot,
         channel_id: str | int,
-        group: str,
-        city: str,
+        group_config: GroupConfig,
         formatter: ScheduleFormatter,
         # State file paths
         today_hash_file: str,
@@ -61,14 +62,14 @@ class GroupScheduleSender:
         warning_check_interval: int,
         # Optional AI explainer
         ai_explainer=None,
+        stats_service: Optional[StatsService] = None,
     ):
         """Initialize GroupScheduleSender
 
         Args:
             bot: Telegram Bot instance for sending messages
             channel_id: Telegram channel ID to send messages to (str like "@channel" or int like -123456)
-            group: Yasno power group (e.g., "2.1")
-            city: City name (e.g., "kiev", "lviv")
+            group_config: GroupConfig instance containing group ID and city
             formatter: ScheduleFormatter instance for message formatting
             today_hash_file: Path to file storing today's schedule hash
             tomorrow_hash_file: Path to file storing tomorrow's schedule hash
@@ -84,12 +85,13 @@ class GroupScheduleSender:
             warning_minutes: Minutes before outage to send warning
             warning_check_interval: Interval between warning checks in seconds
             ai_explainer: Optional ScheduleChangeExplainer instance for AI explanations
+            stats_service: Optional StatsService instance for recording history
         """
         self.bot = bot
         self.channel_id = channel_id
-        self.group = group
-        self.city = city
+        self.group_config = group_config
         self.formatter = formatter
+        self.stats_service = stats_service
 
         # State file paths
         self.today_hash_file = today_hash_file
@@ -130,9 +132,9 @@ class GroupScheduleSender:
         """Write schedule hash to file atomically"""
         try:
             atomic_write_text(file_path, hash_value)
-            logger.info(f"[{self.group}] Hash saved to {file_path}: {hash_value[:8]}...")
+            logger.info(f"[{self.group_config.group}] Hash saved to {file_path}: {hash_value[:8]}...")
         except Exception as e:
-            logger.error(f"[{self.group}] Error writing hash file {file_path}: {e}")
+            logger.error(f"[{self.group_config.group}] Error writing hash file {file_path}: {e}")
             raise
 
     def _read_schedule_data_file(self, file_path: str) -> Optional[dict]:
@@ -147,10 +149,10 @@ class GroupScheduleSender:
                 return json.loads(data_str)
             return None
         except json.JSONDecodeError as e:
-            logger.error(f"[{self.group}] Error parsing schedule data from {file_path}: {e}")
+            logger.error(f"[{self.group_config.group}] Error parsing schedule data from {file_path}: {e}")
             return None
         except Exception as e:
-            logger.error(f"[{self.group}] Error reading schedule data file {file_path}: {e}")
+            logger.error(f"[{self.group_config.group}] Error reading schedule data file {file_path}: {e}")
             return None
 
     def _write_schedule_data_file(self, file_path: str, schedule_data: dict) -> None:
@@ -163,9 +165,9 @@ class GroupScheduleSender:
         try:
             json_str = json.dumps(schedule_data, indent=2, default=str)
             atomic_write_text(file_path, json_str)
-            logger.info(f"[{self.group}] Schedule data saved to {file_path}")
+            logger.info(f"[{self.group_config.group}] Schedule data saved to {file_path}")
         except Exception as e:
-            logger.error(f"[{self.group}] Error writing schedule data file {file_path}: {e}")
+            logger.error(f"[{self.group_config.group}] Error writing schedule data file {file_path}: {e}")
             raise
 
     def _read_last_check_date(self) -> Optional[datetime]:
@@ -175,16 +177,16 @@ class GroupScheduleSender:
             if date_str:
                 return datetime.strptime(date_str, '%Y-%m-%d').date()
         except Exception as e:
-            logger.error(f"[{self.group}] Error parsing last check date: {e}")
+            logger.error(f"[{self.group_config.group}] Error parsing last check date: {e}")
         return None
 
     def _write_last_check_date(self, date_value: datetime) -> None:
         """Write last check date to file atomically"""
         try:
             atomic_write_text(self.last_check_date_file, date_value.strftime('%Y-%m-%d'))
-            logger.debug(f"[{self.group}] Last check date saved: {date_value}")
+            logger.debug(f"[{self.group_config.group}] Last check date saved: {date_value}")
         except Exception as e:
-            logger.error(f"[{self.group}] Error writing last check date file: {e}")
+            logger.error(f"[{self.group_config.group}] Error writing last check date file: {e}")
             raise
 
     def _read_tomorrow_sent_date(self) -> Optional[datetime]:
@@ -194,16 +196,16 @@ class GroupScheduleSender:
             if date_str:
                 return datetime.strptime(date_str, '%Y-%m-%d').date()
         except Exception as e:
-            logger.error(f"[{self.group}] Error parsing tomorrow sent date: {e}")
+            logger.error(f"[{self.group_config.group}] Error parsing tomorrow sent date: {e}")
         return None
 
     def _write_tomorrow_sent_date(self, date_value: datetime) -> None:
         """Write tomorrow sent date to file atomically"""
         try:
             atomic_write_text(self.tomorrow_sent_date_file, date_value.strftime('%Y-%m-%d'))
-            logger.info(f"[{self.group}] Tomorrow sent date saved: {date_value}")
+            logger.info(f"[{self.group_config.group}] Tomorrow sent date saved: {date_value}")
         except Exception as e:
-            logger.error(f"[{self.group}] Error writing tomorrow sent date file: {e}")
+            logger.error(f"[{self.group_config.group}] Error writing tomorrow sent date file: {e}")
             raise
 
     def _read_last_warning_sent(self) -> Optional[str]:
@@ -214,9 +216,9 @@ class GroupScheduleSender:
         """Write last warning identifier to file atomically"""
         try:
             atomic_write_text(self.last_warning_sent_file, warning_id)
-            logger.info(f"[{self.group}] Last warning sent saved: {warning_id}")
+            logger.info(f"[{self.group_config.group}] Last warning sent saved: {warning_id}")
         except Exception as e:
-            logger.error(f"[{self.group}] Error writing last warning file: {e}")
+            logger.error(f"[{self.group_config.group}] Error writing last warning file: {e}")
             raise
 
     # ========== Schedule Hash and Data Methods ==========
@@ -227,13 +229,13 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
                 return None
 
             # Create hash from status and slots (without date to detect actual schedule changes)
             day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
-            schedule_str = f"{self.group}|{day_schedule.status}|"
+            schedule_str = f"{self.group_config.group}|{day_schedule.status}|"
             schedule_str += "|".join([
                 f"{slot.start}-{slot.end}-{slot.type}"
                 for slot in day_schedule.slots
@@ -241,7 +243,7 @@ class GroupScheduleSender:
 
             return hashlib.sha256(schedule_str.encode()).hexdigest()
         except Exception as e:
-            logger.error(f"[{self.group}] Error computing schedule hash: {e}")
+            logger.error(f"[{self.group_config.group}] Error computing schedule hash: {e}")
             return None
 
     def _serialize_day_schedule(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[dict]:
@@ -258,7 +260,7 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
                 return None
 
@@ -277,7 +279,7 @@ class GroupScheduleSender:
                 ]
             }
         except Exception as e:
-            logger.error(f"[{self.group}] Error serializing schedule data: {e}")
+            logger.error(f"[{self.group_config.group}] Error serializing schedule data: {e}")
             return None
 
     def _has_meaningful_changes(self, old_schedule_dict: dict, new_schedule_dict: dict, current_time_minutes: int) -> bool:
@@ -297,7 +299,7 @@ class GroupScheduleSender:
             old_status = old_schedule_dict.get('status')
             new_status = new_schedule_dict.get('status')
             if old_status != new_status:
-                logger.info(f"[{self.group}] Status changed from {old_status} to {new_status} - meaningful change")
+                logger.info(f"[{self.group_config.group}] Status changed from {old_status} to {new_status} - meaningful change")
                 return True
 
             old_slots = old_schedule_dict.get('slots', [])
@@ -319,16 +321,16 @@ class GroupScheduleSender:
 
             # Check if future slots differ
             if old_future_set != new_future_set:
-                logger.info(f"[{self.group}] Future/current slots changed - meaningful change")
+                logger.info(f"[{self.group_config.group}] Future/current slots changed - meaningful change")
                 logger.debug(f"Old future slots: {old_future_set}")
                 logger.debug(f"New future slots: {new_future_set}")
                 return True
 
-            logger.info(f"[{self.group}] Changes only in past slots - not meaningful")
+            logger.info(f"[{self.group_config.group}] Changes only in past slots - not meaningful")
             return False
 
         except Exception as e:
-            logger.error(f"[{self.group}] Error checking meaningful changes: {e}")
+            logger.error(f"[{self.group_config.group}] Error checking meaningful changes: {e}")
             # On error, default to meaningful (safer to notify)
             return True
 
@@ -347,41 +349,41 @@ class GroupScheduleSender:
         try:
             # Step 1: Delete today's hash and data files (yesterday is gone)
             safe_remove(self.today_hash_file, critical=True)
-            logger.info(f"[{self.group}] Deleted today's hash file (yesterday)")
+            logger.info(f"[{self.group_config.group}] Deleted today's hash file (yesterday)")
             safe_remove(self.today_data_file, critical=True)
-            logger.info(f"[{self.group}] Deleted today's data file (yesterday)")
+            logger.info(f"[{self.group_config.group}] Deleted today's data file (yesterday)")
 
             # Step 2: Promote tomorrow's hash to today's hash
             if os.path.exists(self.tomorrow_hash_file):
                 safe_rename(self.tomorrow_hash_file, self.today_hash_file)
-                logger.info(f"[{self.group}] Promoted tomorrow's hash to today's hash")
+                logger.info(f"[{self.group_config.group}] Promoted tomorrow's hash to today's hash")
 
                 # Update in-memory reference ONLY after successful file operation
                 self.last_today_hash = self._read_hash_file(self.today_hash_file)
                 self.last_tomorrow_hash = None
             else:
-                logger.info(f"[{self.group}] No tomorrow hash to promote")
+                logger.info(f"[{self.group_config.group}] No tomorrow hash to promote")
                 self.last_today_hash = None
                 self.last_tomorrow_hash = None
 
             # Step 3: Promote tomorrow's data to today's data
             if os.path.exists(self.tomorrow_data_file):
                 safe_rename(self.tomorrow_data_file, self.today_data_file)
-                logger.info(f"[{self.group}] Promoted tomorrow's data to today's data")
+                logger.info(f"[{self.group_config.group}] Promoted tomorrow's data to today's data")
             else:
-                logger.info(f"[{self.group}] No tomorrow data to promote")
+                logger.info(f"[{self.group_config.group}] No tomorrow data to promote")
 
             # Step 4: Clear tomorrow_sent_date (ready to send new tomorrow)
             safe_remove(self.tomorrow_sent_date_file, critical=False)
-            logger.info(f"[{self.group}] Cleared tomorrow sent date")
+            logger.info(f"[{self.group_config.group}] Cleared tomorrow sent date")
             self.tomorrow_sent_date = None
 
-            logger.info(f"[{self.group}] Midnight rollover completed successfully")
+            logger.info(f"[{self.group_config.group}] Midnight rollover completed successfully")
         except OSError:
-            logger.critical(f"[{self.group}] Critical error during midnight rollover")
+            logger.critical(f"[{self.group_config.group}] Critical error during midnight rollover")
             raise
         except Exception as e:
-            logger.error(f"[{self.group}] Unexpected error during midnight rollover: {e}")
+            logger.error(f"[{self.group_config.group}] Unexpected error during midnight rollover: {e}")
             raise
 
     def check_and_perform_rollover(self, current_date: datetime) -> bool:
@@ -397,7 +399,7 @@ class GroupScheduleSender:
             OSError: If critical rollover operations fail
         """
         if self.last_check_date is not None and current_date != self.last_check_date:
-            logger.info(f"[{self.group}] New day detected! {self.last_check_date} -> {current_date}")
+            logger.info(f"[{self.group_config.group}] New day detected! {self.last_check_date} -> {current_date}")
             self.perform_midnight_rollover()
             return True
         return False
@@ -420,39 +422,58 @@ class GroupScheduleSender:
             change_explanation: Optional AI-generated explanation of changes
         """
         try:
-            group_schedule = schedule_data.get_group(self.group)
+            # Get group schedule once for both stats and processing
+            group_schedule = schedule_data.get_group(self.group_config.group)
+            
+            # Record history before sending
+            if self.stats_service and group_schedule:
+                try:
+                    # Serialize schedule data to JSON
+                    # YasnoScheduleResponse is not a Pydantic model, so we need to manually serialize
+                    # GroupSchedule is a Pydantic model, so we can use model_dump()
+                    schedule_dict = group_schedule.model_dump(mode='json')
+                    schedule_json = json.dumps(schedule_dict, default=str)
+                    
+                    self.stats_service.record_schedule_history(
+                        group_id=self.group_config.group,
+                        schedule_text=schedule_json,
+                        timestamp=datetime.now(TIMEZONE),
+                    )
+                except Exception as e:
+                    logger.error(f"[{self.group_config.group}] Error recording schedule history: {e}")
+
             if group_schedule:
                 day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
                 outage_slots = get_outage_slots(day_schedule.slots)
-                logger.info(f"[{self.group}] Schedule: {len(outage_slots)} outage slots")
-                logger.info(f"[{self.group}] Date: {day_schedule.date}, Status: {day_schedule.status}")
+                logger.info(f"[{self.group_config.group}] Schedule: {len(outage_slots)} outage slots")
+                logger.info(f"[{self.group_config.group}] Date: {day_schedule.date}, Status: {day_schedule.status}")
             else:
-                logger.warning(f"[{self.group}] Group not found in API response")
+                logger.warning(f"[{self.group_config.group}] Group not found in API response")
 
             message = self.formatter.format_schedule_message(
                 schedule_data,
-                self.group,
-                city=self.city,
+                self.group_config.group,
+                city=self.group_config.city,
                 for_tomorrow=for_tomorrow,
                 change_detected=change_detected,
                 change_explanation=change_explanation
             )
 
-            logger.info(f"[{self.group}] Formatted message:\n{message}")
+            logger.info(f"[{self.group_config.group}] Formatted message:\n{message}")
 
             await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=message,
                 parse_mode='HTML'
             )
-            logger.info(f"[{self.group}] Schedule message sent successfully")
+            logger.info(f"[{self.group_config.group}] Schedule message sent successfully")
             return True
 
         except TelegramError as e:
-            logger.error(f"[{self.group}] Failed to send schedule message: {e}")
+            logger.error(f"[{self.group_config.group}] Failed to send schedule message: {e}")
             return False
         except Exception as e:
-            logger.error(f"[{self.group}] Error sending schedule: {e}")
+            logger.error(f"[{self.group_config.group}] Error sending schedule: {e}")
             return False
 
     # ========== Today's Schedule Monitoring ==========
@@ -468,25 +489,25 @@ class GroupScheduleSender:
 
             # Check if we're within the monitoring window
             if current_hour < self.today_start_hour or current_hour > self.today_end_hour:
-                logger.debug(f"[{self.group}] Outside today monitoring window (current: {current_hour}h, window: {self.today_start_hour}-{self.today_end_hour}h)")
+                logger.debug(f"[{self.group_config.group}] Outside today monitoring window (current: {current_hour}h, window: {self.today_start_hour}-{self.today_end_hour}h)")
                 return
 
-            logger.info(f"[{self.group}] Checking for today's schedule changes...")
+            logger.info(f"[{self.group_config.group}] Checking for today's schedule changes...")
 
             current_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=False)
             if not current_hash:
-                logger.warning(f"[{self.group}] Could not compute today's schedule hash")
+                logger.warning(f"[{self.group_config.group}] Could not compute today's schedule hash")
                 return
 
             # Serialize current schedule data
             schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=False)
             if not schedule_dict:
-                logger.warning(f"[{self.group}] Failed to serialize today's schedule data")
+                logger.warning(f"[{self.group_config.group}] Failed to serialize today's schedule data")
 
             # Compare with last known hash
             if not self.last_today_hash:
                 # No hash file exists - send today's schedule (morning case)
-                logger.info(f"[{self.group}] No today hash found - sending today's schedule")
+                logger.info(f"[{self.group_config.group}] No today hash found - sending today's schedule")
                 await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=False)
                 # Write data file first, then hash file
                 if schedule_dict:
@@ -494,7 +515,7 @@ class GroupScheduleSender:
                 self.last_today_hash = current_hash
                 self._write_hash_file(self.today_hash_file, current_hash)
             elif current_hash != self.last_today_hash:
-                logger.info(f"[{self.group}] Today's schedule changed! Old: {self.last_today_hash[:8]}, New: {current_hash[:8]}")
+                logger.info(f"[{self.group_config.group}] Today's schedule changed! Old: {self.last_today_hash[:8]}, New: {current_hash[:8]}")
 
                 # Check if changes are meaningful
                 should_notify = True
@@ -505,7 +526,7 @@ class GroupScheduleSender:
                     current_minutes = now.hour * 60 + now.minute
                     is_meaningful = self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
                 else:
-                    logger.info(f"[{self.group}] No old schedule data available - will notify")
+                    logger.info(f"[{self.group_config.group}] No old schedule data available - will notify")
 
                 # Send notification only if changes are meaningful
                 if is_meaningful:
@@ -524,7 +545,7 @@ class GroupScheduleSender:
                                     current_minutes
                                 )
                             except Exception as e:
-                                logger.warning(f"[{self.group}] Failed to generate AI explanation: {e}")
+                                logger.warning(f"[{self.group_config.group}] Failed to generate AI explanation: {e}")
                 else:
                     ai_explanation = "¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
 
@@ -536,10 +557,10 @@ class GroupScheduleSender:
                 self.last_today_hash = current_hash
                 self._write_hash_file(self.today_hash_file, current_hash)
             else:
-                logger.debug(f"[{self.group}] Today's schedule unchanged")
+                logger.debug(f"[{self.group_config.group}] Today's schedule unchanged")
 
         except Exception as e:
-            logger.error(f"[{self.group}] Error checking today's schedule: {e}")
+            logger.error(f"[{self.group_config.group}] Error checking today's schedule: {e}")
 
     # ========== Tomorrow's Schedule Monitoring ==========
 
@@ -555,41 +576,41 @@ class GroupScheduleSender:
 
             # Check if we're within the monitoring window
             if current_hour < self.tomorrow_start_hour or current_hour > self.tomorrow_end_hour:
-                logger.debug(f"[{self.group}] Outside tomorrow monitoring window (current: {current_hour}h, window: {self.tomorrow_start_hour}-{self.tomorrow_end_hour}h)")
+                logger.debug(f"[{self.group_config.group}] Outside tomorrow monitoring window (current: {current_hour}h, window: {self.tomorrow_start_hour}-{self.tomorrow_end_hour}h)")
                 return
 
             # Check if we already sent tomorrow's schedule today
             if self.tomorrow_sent_date == current_date:
-                logger.debug(f"[{self.group}] Tomorrow's schedule already sent today")
+                logger.debug(f"[{self.group_config.group}] Tomorrow's schedule already sent today")
                 return
 
-            logger.info(f"[{self.group}] Checking if tomorrow's schedule is ready...")
+            logger.info(f"[{self.group_config.group}] Checking if tomorrow's schedule is ready...")
 
-            group_schedule = schedule_data.get_group(self.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
-                logger.warning(f"[{self.group}] Group not found in schedule")
+                logger.warning(f"[{self.group_config.group}] Group not found in schedule")
                 return
 
             tomorrow_schedule = group_schedule.tomorrow
             tomorrow_hash = self._compute_schedule_hash(schedule_data, for_tomorrow=True)
 
             if not tomorrow_hash:
-                logger.warning(f"[{self.group}] Could not compute tomorrow's schedule hash")
+                logger.warning(f"[{self.group_config.group}] Could not compute tomorrow's schedule hash")
                 return
 
             # Check if schedule has changed (or is new)
             if self.last_tomorrow_hash and tomorrow_hash == self.last_tomorrow_hash:
-                logger.debug(f"[{self.group}] Tomorrow's schedule unchanged")
+                logger.debug(f"[{self.group_config.group}] Tomorrow's schedule unchanged")
                 return
 
             # Serialize tomorrow's schedule data
             schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=True)
             if not schedule_dict:
-                logger.warning(f"[{self.group}] Failed to serialize tomorrow's schedule data")
+                logger.warning(f"[{self.group_config.group}] Failed to serialize tomorrow's schedule data")
 
             # Check if tomorrow's schedule is confirmed (not waiting)
             if tomorrow_schedule.status != "WaitingForSchedule":
-                logger.info(f"[{self.group}] Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
+                logger.info(f"[{self.group_config.group}] Tomorrow's schedule is ready! Status: {tomorrow_schedule.status}")
 
                 # Check if this is a change (not first time)
                 change_detected = self.last_tomorrow_hash is not None and self.last_tomorrow_hash != tomorrow_hash
@@ -610,7 +631,7 @@ class GroupScheduleSender:
                                     current_time_minutes=None
                                 )
                             except Exception as e:
-                                logger.warning(f"[{self.group}] Failed to generate AI explanation for tomorrow: {e}")
+                                logger.warning(f"[{self.group_config.group}] Failed to generate AI explanation for tomorrow: {e}")
                                 ai_explanation = None
 
                 # Send tomorrow's schedule
@@ -621,17 +642,17 @@ class GroupScheduleSender:
                     self._write_schedule_data_file(self.tomorrow_data_file, schedule_dict)
                 self.last_tomorrow_hash = tomorrow_hash
                 self._write_hash_file(self.tomorrow_hash_file, tomorrow_hash)
-                logger.info(f"[{self.group}] Saved tomorrow's hash: {tomorrow_hash[:8]}...")
+                logger.info(f"[{self.group_config.group}] Saved tomorrow's hash: {tomorrow_hash[:8]}...")
 
                 # Mark that we sent tomorrow's schedule today
                 self.tomorrow_sent_date = current_date
                 self._write_tomorrow_sent_date(current_date)
-                logger.info(f"[{self.group}] Tomorrow's schedule sent and marked for date: {current_date}")
+                logger.info(f"[{self.group_config.group}] Tomorrow's schedule sent and marked for date: {current_date}")
             else:
-                logger.debug(f"[{self.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
+                logger.debug(f"[{self.group_config.group}] Tomorrow's schedule not ready yet (status: {tomorrow_schedule.status})")
 
         except Exception as e:
-            logger.error(f"[{self.group}] Error checking tomorrow's schedule: {e}")
+            logger.error(f"[{self.group_config.group}] Error checking tomorrow's schedule: {e}")
 
     # ========== Outage Warning Methods ==========
 
@@ -643,8 +664,8 @@ class GroupScheduleSender:
             message = self.formatter.format_outage_warning_message(
                 outage_start,
                 outage_end,
-                self.group,
-                self.city
+                self.group_config.group,
+                self.group_config.city
             )
 
             await self.bot.send_message(
@@ -652,14 +673,14 @@ class GroupScheduleSender:
                 text=message,
                 parse_mode='HTML'
             )
-            logger.info(f"[{self.group}] Warning sent for outage at {outage_start.strftime('%H:%M')}")
+            logger.info(f"[{self.group_config.group}] Warning sent for outage at {outage_start.strftime('%H:%M')}")
             return True
 
         except TelegramError as e:
-            logger.error(f"[{self.group}] Failed to send warning message: {e}")
+            logger.error(f"[{self.group_config.group}] Failed to send warning message: {e}")
             return False
         except Exception as e:
-            logger.error(f"[{self.group}] Error sending warning: {e}")
+            logger.error(f"[{self.group_config.group}] Error sending warning: {e}")
             return False
 
     async def check_outage_warnings(self, schedule_data: YasnoScheduleResponse) -> None:
@@ -671,17 +692,17 @@ class GroupScheduleSender:
         try:
             now = datetime.now(TIMEZONE)
 
-            logger.debug(f"[{self.group}] Checking for upcoming outages...")
+            logger.debug(f"[{self.group_config.group}] Checking for upcoming outages...")
 
             # Skip warning if we're currently in an outage
-            if is_currently_in_outage(schedule_data, self.group):
-                logger.debug(f"[{self.group}] Currently in outage, skipping warning for next outage")
+            if is_currently_in_outage(schedule_data, self.group_config.group):
+                logger.debug(f"[{self.group_config.group}] Currently in outage, skipping warning for next outage")
                 return
 
             # Find next outage
-            next_outage = find_next_outage(schedule_data, self.group)
+            next_outage = find_next_outage(schedule_data, self.group_config.group)
             if not next_outage:
-                logger.debug(f"[{self.group}] No upcoming outages found")
+                logger.debug(f"[{self.group_config.group}] No upcoming outages found")
                 return
 
             outage_start, outage_end = next_outage
@@ -696,18 +717,18 @@ class GroupScheduleSender:
             if self.warning_minutes - 5 <= time_until_outage <= self.warning_minutes + 5:
                 # Within warning window (±5 minutes tolerance)
                 if self.last_warning_sent != warning_id:
-                    logger.info(f"[{self.group}] Sending warning for outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes)")
+                    logger.info(f"[{self.group_config.group}] Sending warning for outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes)")
 
                     if await self.send_outage_warning(outage_start, outage_end):
                         self.last_warning_sent = warning_id
                         self._write_last_warning_sent(warning_id)
                 else:
-                    logger.debug(f"[{self.group}] Warning already sent for {warning_id}")
+                    logger.debug(f"[{self.group_config.group}] Warning already sent for {warning_id}")
             else:
-                logger.debug(f"[{self.group}] Next outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes) - outside warning window")
+                logger.debug(f"[{self.group_config.group}] Next outage at {outage_start.strftime('%H:%M')} (in {int(time_until_outage)} minutes) - outside warning window")
 
         except Exception as e:
-            logger.error(f"[{self.group}] Error checking outage warnings: {e}")
+            logger.error(f"[{self.group_config.group}] Error checking outage warnings: {e}")
 
     # ========== Date Tracking ==========
 
@@ -719,3 +740,35 @@ class GroupScheduleSender:
         """
         self.last_check_date = current_date
         self._write_last_check_date(current_date)
+        logger.debug(f"[{self.group_config.group}] Updated last check date to {current_date}")
+
+    # ========== Main Loop ==========
+
+    async def run_once(self, schedule_data: YasnoScheduleResponse) -> None:
+        """Run one iteration of schedule checking and warning logic
+
+        Args:
+            schedule_data: Schedule data from API (should be pre-fetched/cached)
+        """
+        try:
+            current_date = datetime.now(TIMEZONE).date()
+
+            # Perform midnight rollover if needed
+            self.check_and_perform_rollover(current_date)
+
+            # Check today's schedule for changes
+            await self.check_today_schedule(schedule_data)
+
+            # Check tomorrow's schedule for readiness
+            await self.check_tomorrow_schedule(schedule_data)
+
+            # Check for upcoming outage warnings
+            await self.check_outage_warnings(schedule_data)
+
+            # Update last check date
+            self.update_last_check_date(current_date)
+
+        except Exception as e:
+            logger.critical(f"[{self.group_config.group}] Critical error in run_once: {e}")
+            # Consider adding a backoff or alert mechanism here
+            await asyncio.sleep(60)  # Wait a bit before retrying

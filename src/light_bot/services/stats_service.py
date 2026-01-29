@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from light_bot.models.power_event import PowerEvent
+from light_bot.models.schedule_history import ScheduleHistory
 from light_bot.config import TIMEZONE
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,64 @@ class StatsService:
                         status TEXT NOT NULL
                     )
                 ''')
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS schedule_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id TEXT NOT NULL,
+                        schedule_text TEXT NOT NULL,
+                        timestamp TEXT NOT NULL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+
+    def record_schedule_history(self, group_id: str, schedule_text: str, timestamp: datetime):
+        """Record a schedule history event"""
+        try:
+            timestamp_str = timestamp.isoformat()
+            
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO schedule_history (group_id, schedule_text, timestamp) VALUES (?, ?, ?)',
+                    (group_id, schedule_text, timestamp_str)
+                )
+                conn.commit()
+                logger.info(f"Recorded schedule history for group {group_id} at {timestamp_str}")
+        except Exception as e:
+            logger.error(f"Failed to record schedule history for group {group_id}: {e}")
+
+    def get_schedule_history(self, group_id: str, limit: int = 10) -> List[ScheduleHistory]:
+        """Get recent schedule history for a group"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT id, group_id, schedule_text, timestamp FROM schedule_history WHERE group_id = ? ORDER BY timestamp DESC LIMIT ?',
+                    (group_id, limit)
+                )
+                rows = cursor.fetchall()
+                
+                history = []
+                for row in rows:
+                    try:
+                        timestamp = datetime.fromisoformat(row[3])
+                        if timestamp.tzinfo is None:
+                            timestamp = TIMEZONE.localize(timestamp)
+                        
+                        history.append(ScheduleHistory(
+                            id=row[0],
+                            group_id=row[1],
+                            schedule_text=row[2],
+                            timestamp=timestamp
+                        ))
+                    except ValueError:
+                        continue
+                return history
+        except Exception as e:
+            logger.error(f"Failed to get schedule history for group {group_id}: {e}")
+            return []
 
     def record_event(self, status: str, timestamp: datetime):
         """Record a power event"""
@@ -281,3 +337,251 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get daily history: {e}")
             return []
+            
+    def get_last_event(self) -> Optional[PowerEvent]:
+        """Get the most recent power event"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT id, timestamp, status FROM power_events ORDER BY timestamp DESC LIMIT 1'
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    timestamp = datetime.fromisoformat(row[1])
+                    if timestamp.tzinfo is None:
+                        timestamp = TIMEZONE.localize(timestamp)
+                    
+                    return PowerEvent(
+                        id=row[0],
+                        timestamp=timestamp,
+                        status=row[2]
+                    )
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get last event: {e}")
+            return None
+
+    def purge_old_events(self, days_to_keep: int):
+        """Purge events older than a specified number of days"""
+        try:
+            purge_before = datetime.now(TIMEZONE) - timedelta(days=days_to_keep)
+            purge_before_str = purge_before.isoformat()
+            
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'DELETE FROM power_events WHERE timestamp < ?',
+                    (purge_before_str,)
+                )
+                conn.commit()
+                logger.info(f"Purged {cursor.rowcount} events older than {days_to_keep} days")
+        except Exception as e:
+            logger.error(f"Failed to purge old events: {e}")
+
+    def get_events_for_day(self, target_date: datetime) -> List[PowerEvent]:
+        """Get all power events for a specific day"""
+        try:
+            start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = start_of_day + timedelta(days=1)
+            
+            start_str = start_of_day.isoformat()
+            end_str = end_of_day.isoformat()
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT id, timestamp, status FROM power_events WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp ASC',
+                    (start_str, end_str)
+                )
+                rows = cursor.fetchall()
+                
+                events = []
+                for row in rows:
+                    try:
+                        timestamp = datetime.fromisoformat(row[1])
+                        if timestamp.tzinfo is None:
+                            timestamp = TIMEZONE.localize(timestamp)
+                        
+                        events.append(PowerEvent(
+                            id=row[0],
+                            timestamp=timestamp,
+                            status=row[2]
+                        ))
+                    except ValueError:
+                        continue
+                return events
+        except Exception as e:
+            logger.error(f"Failed to get events for day {target_date.date()}: {e}")
+            return []
+            
+    def get_outage_periods_for_day(self, target_date: datetime) -> List[Dict]:
+        """Get outage periods for a specific day"""
+        events = self.get_events_for_day(target_date)
+        
+        # Need to check the state at the beginning of the day
+        # Get the last event before the start of the day
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT status FROM power_events WHERE timestamp < ? ORDER BY timestamp DESC LIMIT 1',
+                    (start_of_day.isoformat(),)
+                )
+                last_event_before = cursor.fetchone()
+                initial_status = last_event_before[0] if last_event_before else 'on'
+        except Exception as e:
+            logger.error(f"Failed to get initial status for day {target_date.date()}: {e}")
+            initial_status = 'on'
+
+        periods = []
+        current_outage_start = None
+        
+        if initial_status == 'off':
+            current_outage_start = start_of_day
+
+        for event in events:
+            if event.status == 'off' and current_outage_start is None:
+                current_outage_start = event.timestamp
+            elif event.status == 'on' and current_outage_start is not None:
+                periods.append({
+                    'start': current_outage_start,
+                    'end': event.timestamp,
+                    'duration': (event.timestamp - current_outage_start).total_seconds()
+                })
+                current_outage_start = None
+        
+        # If outage is ongoing at the end of the day
+        if current_outage_start is not None:
+            end_of_day = start_of_day + timedelta(days=1)
+            periods.append({
+                'start': current_outage_start,
+                'end': end_of_day,
+                'duration': (end_of_day - current_outage_start).total_seconds()
+            })
+            
+        return periods
+        
+    def get_total_outage_duration_for_day(self, target_date: datetime) -> timedelta:
+        """Calculate total outage duration for a specific day"""
+        periods = self.get_outage_periods_for_day(target_date)
+        total_seconds = sum(p['duration'] for p in periods)
+        return timedelta(seconds=total_seconds)
+        
+    def get_outage_free_percentage_for_day(self, target_date: datetime) -> float:
+        """Calculate the percentage of time power was on for a specific day"""
+        total_duration = self.get_total_outage_duration_for_day(target_date)
+        total_seconds_in_day = 24 * 60 * 60
+        outage_seconds = total_duration.total_seconds()
+        
+        on_seconds = total_seconds_in_day - outage_seconds
+        return (on_seconds / total_seconds_in_day) * 100 if total_seconds_in_day > 0 else 100
+        
+    def get_all_events(self) -> List[PowerEvent]:
+        """Get all power events (use with caution on large DBs)"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id, timestamp, status FROM power_events ORDER BY timestamp ASC')
+                rows = cursor.fetchall()
+                
+                events = []
+                for row in rows:
+                    try:
+                        timestamp = datetime.fromisoformat(row[1])
+                        if timestamp.tzinfo is None:
+                            timestamp = TIMEZONE.localize(timestamp)
+                        
+                        events.append(PowerEvent(
+                            id=row[0],
+                            timestamp=timestamp,
+                            status=row[2]
+                        ))
+                    except ValueError:
+                        continue
+                return events
+        except Exception as e:
+            logger.error(f"Failed to get all events: {e}")
+            return []
+            
+    def migrate_add_group_id(self):
+        """Migration to add group_id column to power_events table"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                
+                # Check if column exists
+                cursor.execute("PRAGMA table_info(power_events)")
+                columns = [col[1] for col in cursor.fetchall()]
+                
+                if 'group_id' not in columns:
+                    logger.info("Adding 'group_id' column to 'power_events' table...")
+                    # Add column with a default value (e.g., 1, or a specific group's ID if it's the only one)
+                    # Here, let's use a placeholder default like 0 or NULL, depending on requirements.
+                    # Let's assume we have a default group with id 'default' or 1.
+                    # For simplicity, let's use a default value of 1.
+                    cursor.execute('ALTER TABLE power_events ADD COLUMN group_id INTEGER DEFAULT 1')
+                    conn.commit()
+                    logger.info("Column 'group_id' added successfully.")
+                else:
+                    logger.info("Column 'group_id' already exists.")
+                    
+        except Exception as e:
+            logger.error(f"Failed to migrate database for group_id: {e}")
+            
+    def record_event_for_group(self, group_id: str, status: str, timestamp: datetime):
+        """Record a power event for a specific group"""
+        try:
+            timestamp_str = timestamp.isoformat()
+            
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'INSERT INTO power_events (timestamp, status, group_id) VALUES (?, ?, ?)',
+                    (timestamp_str, status, group_id)
+                )
+                conn.commit()
+                logger.info(f"Recorded power event for group {group_id}: {status} at {timestamp_str}")
+        except Exception as e:
+            logger.error(f"Failed to record power event for group {group_id}: {e}")
+
+    def get_last_event_for_group(self, group_id: str) -> Optional[PowerEvent]:
+        """Get the most recent power event for a specific group"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT id, timestamp, status FROM power_events WHERE group_id = ? ORDER BY timestamp DESC LIMIT 1',
+                    (group_id,)
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    timestamp = datetime.fromisoformat(row[1])
+                    if timestamp.tzinfo is None:
+                        timestamp = TIMEZONE.localize(timestamp)
+                    
+                    return PowerEvent(
+                        id=row[0],
+                        timestamp=timestamp,
+                        status=row[2],
+                        group_id=group_id
+                    )
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get last event for group {group_id}: {e}")
+            return None
+            
+    def get_stats_for_group(self, group_id: str) -> Dict:
+        """Calculate statistics for a specific group"""
+        # This is a simplified version. A full implementation would be similar to get_stats but with a WHERE clause.
+        # For now, let's return a placeholder.
+        logger.warning("get_stats_for_group is not fully implemented and returns placeholder data.")
+        return {
+            'last_24h': {'count': 0, 'duration': timedelta(0)},
+            'last_7d': {'count': 0, 'duration': timedelta(0)},
+            'last_30d': {'count': 0, 'duration': timedelta(0)}
+        }

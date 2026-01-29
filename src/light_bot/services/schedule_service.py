@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json
 from datetime import datetime
 from typing import Optional
 from telegram import Bot
@@ -7,6 +8,7 @@ from telegram import Bot
 from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.services.multi_group_schedule_manager import MultiGroupScheduleManager
+from light_bot.services.stats_service import StatsService
 from light_bot.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
@@ -19,6 +21,7 @@ from light_bot.config import (
     SCHEDULE_TOMORROW_END_HOUR,
     OUTAGE_WARNING_MINUTES,
     OUTAGE_WARNING_CHECK_INTERVAL,
+    GROUP_RESOLUTION_INTERVAL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
     ENABLE_AI_EXPLANATIONS,
@@ -38,15 +41,19 @@ class ScheduleService:
     Supports monitoring single or multiple groups via YASNO_GROUPS configuration.
     """
 
-    def __init__(self):
+    def __init__(self, stats_service: StatsService):
         self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
         self.formatter = ScheduleFormatter()
         self.monitoring = False
+        self.stats_service = stats_service
 
         # Schedule data cache with thread safety
         self._cache_lock = asyncio.Lock()
         self._cached_schedule: Optional[YasnoScheduleResponse] = None
         self._cache_timestamp: Optional[datetime] = None
+
+        # Group resolution tracking
+        self._last_resolution_time: Optional[datetime] = None
 
         # Initialize AI explainer if enabled and API key is available
         self.ai_explainer = None
@@ -67,6 +74,7 @@ class ScheduleService:
             formatter=self.formatter,
             group_configs=YASNO_GROUP_CONFIGS,
             ai_explainer=self.ai_explainer,
+            stats_service=self.stats_service,
         )
 
         # For backward compatibility, expose the first group sender
@@ -104,6 +112,23 @@ class ScheduleService:
                 self._cached_schedule = schedule_data
                 self._cache_timestamp = now
                 logger.debug("Schedule cache updated")
+                for group_config in YASNO_GROUP_CONFIGS:
+                    if group_config.id == "home":
+                        # Serialize schedule data to JSON
+                        # YasnoScheduleResponse is not a Pydantic model, so we need to manually serialize
+                        group_schedule = schedule_data.get_group(group_config.group)
+                        if group_schedule:
+                            # GroupSchedule is a Pydantic model, so we can use model_dump()
+                            schedule_dict = group_schedule.model_dump(mode='json')
+                            schedule_json = json.dumps(schedule_dict, default=str)
+                        else:
+                            schedule_json = json.dumps({"error": "group not found"})
+                        
+                        self.stats_service.record_schedule_history(
+                            group_id=group_config.id,
+                            schedule_text=schedule_json,
+                            timestamp=now,
+                        )
             else:
                 logger.warning("Failed to fetch schedule data, cache invalidated")
                 self._cached_schedule = None
@@ -206,6 +231,33 @@ class ScheduleService:
                 # Update the last check date
                 self.multi_group_manager.update_last_check_dates(current_date)
 
+                # Check if we need to re-resolve dynamic groups
+                if GROUP_RESOLUTION_INTERVAL > 0:
+                    now = datetime.now(TIMEZONE)
+                    should_resolve = False
+                    
+                    if self._last_resolution_time is None:
+                        # First time - resolve immediately
+                        should_resolve = True
+                    else:
+                        # Check if interval has passed
+                        time_since_resolution = (now - self._last_resolution_time).total_seconds()
+                        if time_since_resolution >= GROUP_RESOLUTION_INTERVAL:
+                            should_resolve = True
+                    
+                    if should_resolve:
+                        logger.info("Re-resolving dynamic groups...")
+                        try:
+                            if self.multi_group_manager.resolve_dynamic_groups():
+                                logger.info("Dynamic group changes detected")
+                                # Invalidate cache to fetch fresh schedule for new groups
+                                self._invalidate_cache()
+                            else:
+                                logger.debug("No dynamic group changes detected")
+                            self._last_resolution_time = now
+                        except Exception as e:
+                            logger.error(f"Error re-resolving dynamic groups: {e}")
+
                 # Wait before next check
                 await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)
 
@@ -221,4 +273,10 @@ class ScheduleService:
 
 
 # Global service instance
-schedule_service = ScheduleService()
+schedule_service: Optional[ScheduleService] = None
+
+def get_schedule_service(stats_service: StatsService) -> ScheduleService:
+    global schedule_service
+    if schedule_service is None:
+        schedule_service = ScheduleService(stats_service)
+    return schedule_service

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schedule History for {{ group_id }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/diff2html/3.4.45/diff2html.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+        }
+        .history-item {
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .history-header {
+            padding: 15px;
+            border-bottom: 1px solid #ddd;
+            background-color: #f2f2f2;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        .history-header h3 {
+            margin: 0;
+            font-size: 1.2em;
+        }
+        .history-body {
+            padding: 15px;
+        }
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .schedule-table th, .schedule-table td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        .schedule-table th {
+            background-color: #f7f7f7;
+        }
+        .diff-container {
+            margin-top: 15px;
+        }
+        .d2h-file-header {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Schedule History for {{ group_id }}</h1>
+
+    {% for item in history %}
+    <div class="history-item">
+        <div class="history-header">
+            <h3>{{ item.timestamp.strftime('%Y-%m-%d %H:%M:%S %Z') }}</h3>
+        </div>
+        <div class="history-body">
+            <h4>Schedule:</h4>
+            <div id="schedule-{{ loop.index }}"></div>
+
+            <h4>Changes from previous:</h4>
+            <div id="diff-{{ loop.index }}" class="diff-container"></div>
+
+            <textarea id="schedule-text-{{ loop.index }}" style="display:none;">{{ item.schedule_text }}</textarea>
+            {% if not loop.last %}
+            <textarea id="schedule-text-{{ loop.index + 1 }}" style="display:none;">{{ history[loop.index].schedule_text }}</textarea>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/diff2html/3.4.45/diff2html.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const historyItems = document.querySelectorAll('.history-item');
+
+            historyItems.forEach((item, index) => {
+                const loopIndex = index + 1;
+                const scheduleTextElement = document.getElementById(`schedule-text-${loopIndex}`);
+                const scheduleContainer = document.getElementById(`schedule-${loopIndex}`);
+
+                if (scheduleTextElement) {
+                    try {
+                        const scheduleData = JSON.parse(scheduleTextElement.value);
+                        scheduleContainer.innerHTML = formatSchedule(scheduleData);
+                    } catch (e) {
+                        console.error('Error parsing schedule JSON:', e);
+                        scheduleContainer.innerHTML = '<p>Error displaying schedule.</p>';
+                    }
+                }
+
+                const diffContainer = document.getElementById(`diff-${loopIndex}`);
+                const currentScheduleText = scheduleTextElement ? scheduleTextElement.value : '';
+                const previousScheduleTextElement = document.getElementById(`schedule-text-${loopIndex + 1}`);
+                const previousScheduleText = previousScheduleTextElement ? previousScheduleTextElement.value : '';
+
+                if (currentScheduleText && previousScheduleText) {
+                    try {
+                        const current = JSON.stringify(JSON.parse(currentScheduleText), null, 2);
+                        const previous = JSON.stringify(JSON.parse(previousScheduleText), null, 2);
+                        
+                        const diff = Diff.createPatch('schedule.json', previous, current);
+                        const diff2htmlUi = new Diff2HtmlUI(diffContainer, diff, { 
+                            drawFileList: false, 
+                            matching: 'lines',
+                            outputFormat: 'side-by-side'
+                        });
+                        diff2htmlUi.draw();
+                    } catch (e) {
+                        console.error('Error generating diff:', e);
+                        diffContainer.innerHTML = '<p>Could not display changes.</p>';
+                    }
+                } else {
+                    diffContainer.innerHTML = '<p>No previous version to compare.</p>';
+                }
+            });
+        });
+
+        function formatSchedule(data) {
+            let html = '<h4>Today</h4>' + renderDay(data.today);
+            html += '<h4>Tomorrow</h4>' + renderDay(data.tomorrow);
+            return html;
+        }
+
+        function renderDay(dayData) {
+            if (!dayData) return '<p>No data</p>';
+            let table = '<table class="schedule-table"><thead><tr><th>Time</th><th>Status</th></tr></thead><tbody>';
+            dayData.schedule.forEach(slot => {
+                table += `<tr><td>${slot.hour}:00 - ${slot.hour + 1}:00</td><td>${slot.type}</td></tr>`;
+            });
+            table += '</tbody></table>';
+            return table;
+        }
+    </script>
+</body>
+</html>
