@@ -59,7 +59,8 @@ try:
 
         # Extract fields with validation
         group_id = item.get('id', '').strip()
-        group = item.get('group', '').strip()
+        group = item.get('group', '').strip() or None  # Convert empty string to None
+        group_dynamic = item.get('group_dynamic', '').strip() or None  # Convert empty string to None
         city = item.get('city', '').strip()
         channel = item.get('channel', '').strip() or None
         chat_id = item.get('chat_id', '') or None
@@ -68,18 +69,23 @@ try:
 
         if not group_id:
             raise ValueError(f"Missing 'id' field in group config: {item}")
-        if not group:
-            raise ValueError(f"Missing 'group' field in group config: {item}")
         if not city:
             raise ValueError(f"Missing 'city' field in group config: {item}")
 
-        YASNO_GROUP_CONFIGS.append(GroupConfig(
+        # Create GroupConfig (validation happens in __post_init__)
+        config = GroupConfig(
             id=group_id,
             group=group,
+            group_dynamic=group_dynamic,
             city=city,
             channel=channel,
             chat_id=chat_id
-        ))
+        )
+        
+        # Resolve dynamic groups immediately at startup
+        _, _ = config.resolve_group()  # Unpack tuple, ignore change status at startup
+        
+        YASNO_GROUP_CONFIGS.append(config)
 
     print(YASNO_GROUP_CONFIGS)
 
@@ -101,6 +107,11 @@ SCHEDULE_TOMORROW_END_HOUR = int(os.getenv('SCHEDULE_TOMORROW_END_HOUR', 23))  #
 # Outage warning configuration
 OUTAGE_WARNING_MINUTES = int(os.getenv('OUTAGE_WARNING_MINUTES', 30))  # Send warning 30 minutes before outage
 OUTAGE_WARNING_CHECK_INTERVAL = int(os.getenv('OUTAGE_WARNING_CHECK_INTERVAL', 300))  # Check every 5 minutes
+
+# Group Resolution Configuration
+# How often to re-resolve dynamic groups (in seconds)
+# Default: 21600 (6 hours), Set to 0 to disable periodic resolution
+GROUP_RESOLUTION_INTERVAL = int(os.getenv('GROUP_RESOLUTION_INTERVAL', 21600))
 
 # OpenAI API Configuration (optional - for AI explanations of schedule changes)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # Optional: OpenAI API key

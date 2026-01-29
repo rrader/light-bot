@@ -20,6 +20,7 @@ from light_bot.config import (
     SCHEDULE_TOMORROW_END_HOUR,
     OUTAGE_WARNING_MINUTES,
     OUTAGE_WARNING_CHECK_INTERVAL,
+    GROUP_RESOLUTION_INTERVAL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
     ENABLE_AI_EXPLANATIONS,
@@ -49,6 +50,9 @@ class ScheduleService:
         self._cache_lock = asyncio.Lock()
         self._cached_schedule: Optional[YasnoScheduleResponse] = None
         self._cache_timestamp: Optional[datetime] = None
+
+        # Group resolution tracking
+        self._last_resolution_time: Optional[datetime] = None
 
         # Initialize AI explainer if enabled and API key is available
         self.ai_explainer = None
@@ -214,6 +218,33 @@ class ScheduleService:
 
                 # Update the last check date
                 self.multi_group_manager.update_last_check_dates(current_date)
+
+                # Check if we need to re-resolve dynamic groups
+                if GROUP_RESOLUTION_INTERVAL > 0:
+                    now = datetime.now(TIMEZONE)
+                    should_resolve = False
+                    
+                    if self._last_resolution_time is None:
+                        # First time - resolve immediately
+                        should_resolve = True
+                    else:
+                        # Check if interval has passed
+                        time_since_resolution = (now - self._last_resolution_time).total_seconds()
+                        if time_since_resolution >= GROUP_RESOLUTION_INTERVAL:
+                            should_resolve = True
+                    
+                    if should_resolve:
+                        logger.info("Re-resolving dynamic groups...")
+                        try:
+                            if self.multi_group_manager.resolve_dynamic_groups():
+                                logger.info("Dynamic group changes detected")
+                                # Invalidate cache to fetch fresh schedule for new groups
+                                self._invalidate_cache()
+                            else:
+                                logger.debug("No dynamic group changes detected")
+                            self._last_resolution_time = now
+                        except Exception as e:
+                            logger.error(f"Error re-resolving dynamic groups: {e}")
 
                 # Wait before next check
                 await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)

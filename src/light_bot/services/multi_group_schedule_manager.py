@@ -72,8 +72,7 @@ class MultiGroupScheduleManager:
             self.group_senders[config.id] = GroupScheduleSender(
                 bot=bot,
                 channel_id=config.target_channel,
-                group=config.group,
-                city=config.city,
+                group_config=config,
                 formatter=formatter,
                 # State files with config ID suffix in data directory
                 today_hash_file=make_path(f"last_schedule_today_hash_{file_suffix}.txt"),
@@ -185,6 +184,29 @@ class MultiGroupScheduleManager:
             KeyError: If group is not being monitored
         """
         return self.group_senders[group]
+
+    def resolve_dynamic_groups(self) -> bool:
+        """Re-resolve all dynamic groups and detect changes
+        
+        This method re-resolves all GroupConfig instances that have group_dynamic set.
+        Individual group changes are logged as they occur.
+        
+        Returns:
+            True if any group changed, False otherwise
+        """
+        any_changed = False
+        
+        for config in self.group_configs:
+            if config.group_dynamic:
+                try:
+                    _, changed = config.resolve_group()
+                    if changed:
+                        any_changed = True
+                        logger.info(f"Group changed for '{config.id}': {config.group}")
+                except Exception as e:
+                    logger.error(f"Failed to re-resolve dynamic group for '{config.id}': {e}")
+        
+        return any_changed
 
     @property
     def group_count(self) -> int:
