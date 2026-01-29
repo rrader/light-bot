@@ -73,6 +73,7 @@ class ScheduleService:
             formatter=self.formatter,
             group_configs=YASNO_GROUP_CONFIGS,
             ai_explainer=self.ai_explainer,
+            stats_service=self.stats_service,
         )
 
         # For backward compatibility, expose the first group sender

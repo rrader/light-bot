@@ -14,6 +14,7 @@ from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove,
 from light_bot.config import TIMEZONE
 from light_bot.core.schedule_tools import find_next_outage, get_outage_slots, is_currently_in_outage
 from light_bot.models.group_config import GroupConfig
+from light_bot.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class GroupScheduleSender:
         warning_check_interval: int,
         # Optional AI explainer
         ai_explainer=None,
+        stats_service: Optional[StatsService] = None,
     ):
         """Initialize GroupScheduleSender
 
@@ -83,11 +85,13 @@ class GroupScheduleSender:
             warning_minutes: Minutes before outage to send warning
             warning_check_interval: Interval between warning checks in seconds
             ai_explainer: Optional ScheduleChangeExplainer instance for AI explanations
+            stats_service: Optional StatsService instance for recording history
         """
         self.bot = bot
         self.channel_id = channel_id
         self.group_config = group_config
         self.formatter = formatter
+        self.stats_service = stats_service
 
         # State file paths
         self.today_hash_file = today_hash_file
@@ -225,7 +229,7 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group_config.group_config.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
                 return None
 
@@ -256,7 +260,7 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group_config.group_config.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
                 return None
 
@@ -418,7 +422,18 @@ class GroupScheduleSender:
             change_explanation: Optional AI-generated explanation of changes
         """
         try:
-            group_schedule = schedule_data.get_group(self.group_config.group_config.group)
+            # Record history before sending
+            if self.stats_service:
+                try:
+                    self.stats_service.record_schedule_history(
+                        group_id=self.group_config.group,
+                        schedule_text=schedule_data.model_dump_json(),
+                        timestamp=datetime.now(TIMEZONE),
+                    )
+                except Exception as e:
+                    logger.error(f"[{self.group_config.group}] Error recording schedule history: {e}")
+
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if group_schedule:
                 day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
                 outage_slots = get_outage_slots(day_schedule.slots)
@@ -563,7 +578,7 @@ class GroupScheduleSender:
 
             logger.info(f"[{self.group_config.group}] Checking if tomorrow's schedule is ready...")
 
-            group_schedule = schedule_data.get_group(self.group_config.group_config.group)
+            group_schedule = schedule_data.get_group(self.group_config.group)
             if not group_schedule:
                 logger.warning(f"[{self.group_config.group}] Group not found in schedule")
                 return
