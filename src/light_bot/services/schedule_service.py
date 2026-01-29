@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import json
 from datetime import datetime
 from typing import Optional
 from telegram import Bot
@@ -113,9 +114,19 @@ class ScheduleService:
                 logger.debug("Schedule cache updated")
                 for group_config in YASNO_GROUP_CONFIGS:
                     if group_config.id == "home":
+                        # Serialize schedule data to JSON
+                        # YasnoScheduleResponse is not a Pydantic model, so we need to manually serialize
+                        group_schedule = schedule_data.get_group(group_config.group)
+                        if group_schedule:
+                            # GroupSchedule is a Pydantic model, so we can use model_dump()
+                            schedule_dict = group_schedule.model_dump(mode='json')
+                            schedule_json = json.dumps(schedule_dict, default=str)
+                        else:
+                            schedule_json = json.dumps({"error": "group not found"})
+                        
                         self.stats_service.record_schedule_history(
                             group_id=group_config.id,
-                            schedule_text=schedule_data.model_dump_json(),
+                            schedule_text=schedule_json,
                             timestamp=now,
                         )
             else:
