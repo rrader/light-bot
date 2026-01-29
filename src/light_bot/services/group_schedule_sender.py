@@ -235,7 +235,7 @@ class GroupScheduleSender:
 
             # Create hash from status and slots (without date to detect actual schedule changes)
             day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
-            schedule_str = f"{self.group}|{day_schedule.status}|"
+            schedule_str = f"{self.group_config.group}|{day_schedule.status}|"
             schedule_str += "|".join([
                 f"{slot.start}-{slot.end}-{slot.type}"
                 for slot in day_schedule.slots
