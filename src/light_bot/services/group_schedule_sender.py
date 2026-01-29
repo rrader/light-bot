@@ -422,18 +422,26 @@ class GroupScheduleSender:
             change_explanation: Optional AI-generated explanation of changes
         """
         try:
+            # Get group schedule once for both stats and processing
+            group_schedule = schedule_data.get_group(self.group_config.group)
+            
             # Record history before sending
-            if self.stats_service:
+            if self.stats_service and group_schedule:
                 try:
+                    # Serialize schedule data to JSON
+                    # YasnoScheduleResponse is not a Pydantic model, so we need to manually serialize
+                    # GroupSchedule is a Pydantic model, so we can use model_dump()
+                    schedule_dict = group_schedule.model_dump(mode='json')
+                    schedule_json = json.dumps(schedule_dict, default=str)
+                    
                     self.stats_service.record_schedule_history(
                         group_id=self.group_config.group,
-                        schedule_text=schedule_data.model_dump_json(),
+                        schedule_text=schedule_json,
                         timestamp=datetime.now(TIMEZONE),
                     )
                 except Exception as e:
                     logger.error(f"[{self.group_config.group}] Error recording schedule history: {e}")
 
-            group_schedule = schedule_data.get_group(self.group_config.group)
             if group_schedule:
                 day_schedule = group_schedule.tomorrow if for_tomorrow else group_schedule.today
                 outage_slots = get_outage_slots(day_schedule.slots)
