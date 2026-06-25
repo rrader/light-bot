@@ -60,5 +60,46 @@ Key environment variables in `.env`:
 - `OUTAGE_WARNING_MINUTES` - Minutes before outage to send warning (default: 30)
 - `OUTAGE_WARNING_CHECK_INTERVAL` - How often to check for upcoming outages in seconds (default: 300)
 
+## UDR Credentials
+
+UDR SSH credentials are stored encrypted in `.udr-credentials.enc` (committed to git).
+The plaintext `.udr-credentials` is gitignored.
+
+To decrypt:
+```bash
+openssl rsautl -decrypt -inkey ~/.ssh/personal -in .udr-credentials.enc -out .udr-credentials
+```
+
+Or with the newer syntax:
+```bash
+openssl pkeyutl -decrypt -inkey ~/.ssh/personal -in .udr-credentials.enc -out .udr-credentials
+```
+
+Then `source .udr-credentials` to load `UDR_HOST`, `UDR_USER`, `UDR_PASSWORD`.
+
+## Deploying monitor.sh to the Router
+
+The script runs on the UDR managed by systemd service `light-bot-monitor.service`.
+- Script location: `/config/monitor.sh`
+- Service file: `/etc/systemd/system/light-bot-monitor.service`
+- The service sets env vars (`SMART_SOCKET_IP`, `AC1_IP`, etc.) that override script defaults.
+
+```bash
+# Load credentials
+source .udr-credentials
+
+# Upload the script and service file
+sshpass -p "$UDR_PASSWORD" scp -o StrictHostKeyChecking=no monitor.sh ${UDR_USER}@${UDR_HOST}:/config/monitor.sh
+sshpass -p "$UDR_PASSWORD" scp -o StrictHostKeyChecking=no light-bot-monitor.service ${UDR_USER}@${UDR_HOST}:/etc/systemd/system/light-bot-monitor.service
+
+# Reload systemd and restart the service
+sshpass -p "$UDR_PASSWORD" ssh -o StrictHostKeyChecking=no ${UDR_USER}@${UDR_HOST} "systemctl daemon-reload && systemctl restart light-bot-monitor"
+
+# Check it's running
+sshpass -p "$UDR_PASSWORD" ssh -o StrictHostKeyChecking=no ${UDR_USER}@${UDR_HOST} "systemctl status light-bot-monitor"
+```
+
+Note: `light-bot-monitor.service` in the repo uses `REPLACE_WITH_TOKEN` / `REPLACE_WITH_UDR_API_KEY` placeholders — fill in the real values from `.udr-credentials` or `.env` before deploying, or edit directly on the router.
+
 ## Dependencies
 - **yasno_hass**: Power outage schedule API client adapted from [kuzin2006/yasno_hass](https://github.com/kuzin2006/yasno_hass) - originally a Home Assistant integration, modified to work as a standalone module for fetching Ukrainian power grid outage schedules from Yasno API

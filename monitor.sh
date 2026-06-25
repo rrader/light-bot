@@ -3,7 +3,10 @@
 source .env
 
 # Configuration
-TARGET_IP="${TARGET_IP:-192.168.1.152}"
+SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.4.152}"
+AC1_IP="${AC1_IP:-192.168.4.77}"
+AC2_IP="${AC2_IP:-192.168.4.94}"
+AC3_IP="${AC3_IP:-192.168.4.206}"
 TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
 API_URL_PROD="https://light.rmn.pp.ua/power-status"
 API_URL_STAGING="https://light-staging.rmn.pp.ua/power-status"
@@ -26,22 +29,23 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# Function to check if host is reachable
+# Function to check if any ping target is reachable
 check_host() {
-    if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$TARGET_IP" > /dev/null 2>&1; then
-        return 0  # Host is up
-    else
-        return 1  # Host is down
-    fi
+    for ip in "$SMART_SOCKET_IP" "$AC1_IP" "$AC2_IP" "$AC3_IP"; do
+        if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$ip" > /dev/null 2>&1; then
+            return 0  # At least one host is up
+        fi
+    done
+    return 1  # All hosts are down
 }
 
-check_udr_host() {
-    if curl -sk -H "X-API-Key: $UDR_API_KEY" https://localhost/proxy/network/api/s/default/stat/sta | jq -e ".data[] | select(.ip==\"$TARGET_UDR_IP\")" >/dev/null 2>&1; then
-        return 0  # Host is up
-    else
-        return 1  # Host is down
-    fi
-}
+# check_udr_host() {
+#     if curl -sk -H "X-API-Key: $UDR_API_KEY" https://localhost/proxy/network/api/s/default/stat/sta | jq -e ".data[] | select(.ip==\"$TARGET_UDR_IP\")" >/dev/null 2>&1; then
+#         return 0  # Host is up
+#     else
+#         return 1  # Host is down
+#     fi
+# }
 
 # Function to send status to API
 send_status() {
@@ -87,8 +91,8 @@ send_status() {
 # Main monitoring loop
 main() {
     log "${YELLOW}Starting host monitoring...${NC}"
-    log "Target IP (ping): $TARGET_IP"
-    log "Target UDR IP: $TARGET_UDR_IP"
+    log "Ping targets: $SMART_SOCKET_IP, $AC1_IP, $AC2_IP, $AC3_IP"
+    # log "Target UDR IP: $TARGET_UDR_IP"
     log "API (Production): $API_URL_PROD"
     log "API (Staging): $API_URL_STAGING"
     log "Check interval: ${CHECK_INTERVAL}s"
@@ -102,39 +106,17 @@ main() {
     consecutive_down=0
 
     while true; do
-        # Check both hosts
-        ping_result=false
-        udr_result=false
-
+        # Check ping targets
         if check_host; then
-            ping_result=true
-        fi
-
-        if check_udr_host; then
-            udr_result=true
-        fi
-
-        # At least one host must be reachable for UP status
-        # DOWN only when BOTH hosts are unreachable
-        if $ping_result || $udr_result; then
-            # At least one host is up - power is ON
             consecutive_up=$((consecutive_up + 1))
             consecutive_down=0
             status_text="${GREEN}UP${NC}"
-
-            if $ping_result && $udr_result; then
-                detail="(ping: UP, UDR: UP)"
-            elif $ping_result; then
-                detail="(ping: UP, UDR: DOWN)"
-            else
-                detail="(ping: DOWN, UDR: UP)"
-            fi
+            detail="(ping: UP)"
         else
-            # Both hosts are down - power is OFF
             consecutive_down=$((consecutive_down + 1))
             consecutive_up=0
             status_text="${RED}DOWN${NC}"
-            detail="(ping: DOWN, UDR: DOWN)"
+            detail="(ping: DOWN)"
         fi
 
         log "Hosts status: $status_text $detail (up: $consecutive_up, down: $consecutive_down)"

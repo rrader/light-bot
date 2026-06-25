@@ -55,3 +55,7 @@ htmlcov/
 
 # GitHub App credentials
 gha-creds-*.json
+
+# UDR credentials
+.udr-credentials
+monitor.sh.udr

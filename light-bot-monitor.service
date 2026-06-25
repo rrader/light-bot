@@ -1,0 +1,19 @@
+[Unit]
+Description=Light Bot Host Monitor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/config
+Environment="API_TOKEN=REPLACE_WITH_TOKEN"
+Environment="UDR_API_KEY=REPLACE_WITH_UDR_API_KEY"
+Environment="SMART_SOCKET_IP=192.168.4.152"
+Environment="AC1_IP=192.168.4.77"
+Environment="AC2_IP=192.168.4.94"
+Environment="AC3_IP=192.168.4.206"
+ExecStart=bash /config/monitor.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
