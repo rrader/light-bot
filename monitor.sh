@@ -3,10 +3,10 @@
 source .env
 
 # Configuration
-SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.4.152}"
-AC1_IP="${AC1_IP:-192.168.4.77}"
-AC2_IP="${AC2_IP:-192.168.4.94}"
-AC3_IP="${AC3_IP:-192.168.4.206}"
+SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.1.152}"
+AC1_IP="${AC1_IP:-192.168.1.77}"
+AC2_IP="${AC2_IP:-192.168.1.94}"
+AC3_IP="${AC3_IP:-192.168.1.206}"
 TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
 API_URL_PROD="https://light.rmn.pp.ua/power-status"
 API_URL_STAGING="https://light-staging.rmn.pp.ua/power-status"
