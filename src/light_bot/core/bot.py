@@ -20,18 +20,19 @@ class TelegramChannelBot:
 
         self.channel_id = TELEGRAM_CHANNEL_ID
 
-    async def send_message(self, text: str) -> bool:
-        """Send text message to the configured channel"""
+    async def send_message(self, text: str, chat_id: str = None) -> bool:
+        """Send text message to the configured channel or specified chat_id"""
+        target = chat_id or self.channel_id
         try:
             message = await self.bot.send_message(
-                chat_id=self.channel_id,
+                chat_id=target,
                 text=text,
                 parse_mode='HTML'
             )
-            logger.info(f"Message sent successfully: {message.message_id}")
+            logger.info(f"Message sent successfully to {target}: {message.message_id}")
             return True
         except TelegramError as e:
-            logger.error(f"Failed to send message: {e}")
+            logger.error(f"Failed to send message to {target}: {e}")
             return False
 
 

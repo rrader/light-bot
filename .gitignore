@@ -24,6 +24,8 @@ ENV/
 
 # Runtime data files
 watchdog_status.txt
+watchdog_status_*.txt
+*.db
 last_schedule_hash.txt
 last_schedule_*_hash.txt
 last_schedule_*_data.json

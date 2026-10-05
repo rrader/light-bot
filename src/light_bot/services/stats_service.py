@@ -25,9 +25,16 @@ class StatsService:
                     CREATE TABLE IF NOT EXISTS power_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
-                        status TEXT NOT NULL
+                        status TEXT NOT NULL,
+                        location TEXT DEFAULT 'home'
                     )
                 ''')
+                # Migrate existing table if location column is missing
+                try:
+                    cursor.execute("ALTER TABLE power_events ADD COLUMN location TEXT DEFAULT 'home'")
+                except sqlite3.OperationalError:
+                    pass
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS schedule_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +94,7 @@ class StatsService:
             logger.error(f"Failed to get schedule history for group {group_id}: {e}")
             return []
 
-    def record_event(self, status: str, timestamp: datetime):
+    def record_event(self, status: str, timestamp: datetime, location: str = 'home'):
         """Record a power event"""
         try:
             # Ensure timestamp is ISO format string
@@ -96,23 +103,29 @@ class StatsService:
             with self._get_conn() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'INSERT INTO power_events (timestamp, status) VALUES (?, ?)',
-                    (timestamp_str, status)
+                    'INSERT INTO power_events (timestamp, status, location) VALUES (?, ?, ?)',
+                    (timestamp_str, status, location)
                 )
                 conn.commit()
-                logger.info(f"Recorded power event: {status} at {timestamp_str}")
+                logger.info(f"Recorded power event: {status} at {timestamp_str} (location: {location})")
         except Exception as e:
             logger.error(f"Failed to record power event: {e}")
 
-    def get_recent_events(self, limit: int = 10) -> List[PowerEvent]:
-        """Get recent power events"""
+    def get_recent_events(self, limit: int = 10, location: Optional[str] = None) -> List[PowerEvent]:
+        """Get recent power events, optionally filtered by location"""
         try:
             with self._get_conn() as conn:
                 cursor = conn.cursor()
-                cursor.execute(
-                    'SELECT id, timestamp, status FROM power_events ORDER BY timestamp DESC LIMIT ?',
-                    (limit,)
-                )
+                if location:
+                    cursor.execute(
+                        'SELECT id, timestamp, status, location FROM power_events WHERE location = ? ORDER BY timestamp DESC LIMIT ?',
+                        (location, limit)
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT id, timestamp, status, location FROM power_events ORDER BY timestamp DESC LIMIT ?',
+                        (limit,)
+                    )
                 rows = cursor.fetchall()
                 
                 events = []
@@ -123,10 +136,12 @@ class StatsService:
                         if timestamp.tzinfo is None:
                             timestamp = TIMEZONE.localize(timestamp)
                         
+                        loc = row[3] if len(row) > 3 and row[3] else 'home'
                         events.append(PowerEvent(
                             id=row[0],
                             timestamp=timestamp,
-                            status=row[2]
+                            status=row[2],
+                            location=loc
                         ))
                     except ValueError:
                         continue

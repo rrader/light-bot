@@ -11,7 +11,7 @@ from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
-from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH
+from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS, get_location_config
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
 from light_bot.core.stats_blueprint import create_stats_blueprint
@@ -60,23 +60,25 @@ def require_api_token(f):
     return decorated_function
 
 
-def write_power_status(status: str):
+def write_power_status(status: str, file_path: Optional[str] = None):
     """Write power status to file with timestamp in Kyiv timezone"""
+    target_file = file_path or WATCHDOG_STATUS_FILE
     try:
         timestamp = datetime.now(TIMEZONE).isoformat()
         content = f"{status}\nLast updated: {timestamp}\n"
-        atomic_write_text(WATCHDOG_STATUS_FILE, content)
-        logger.info(f"Power status written to file: {status}")
+        atomic_write_text(target_file, content)
+        logger.info(f"Power status written to file ({target_file}): {status}")
         return True
     except Exception as e:
-        logger.error(f"Error writing power status to file: {e}")
+        logger.error(f"Error writing power status to file ({target_file}): {e}")
         return False
 
 
-def read_power_status():
+def read_power_status(file_path: Optional[str] = None):
     """Read current power status from file with parsed timestamp"""
+    target_file = file_path or WATCHDOG_STATUS_FILE
     try:
-        content = read_text(WATCHDOG_STATUS_FILE)
+        content = read_text(target_file)
         if content:
             lines = content.split('\n')
             if lines:
@@ -99,63 +101,161 @@ def read_power_status():
                 }
         return {'status': 'Unknown', 'last_updated': 'Never', 'timestamp': None}
     except Exception as e:
-        logger.error(f"Error reading power status from file: {e}")
+        logger.error(f"Error reading power status from file ({target_file}): {e}")
         return {'status': 'Error', 'last_updated': str(e), 'timestamp': None}
 
 
-def find_next_outage_home() -> Optional[Tuple[str, str, bool]]:
-    """Find the next scheduled outage (home group only)
-
-    Args:
-        schedule_data: Schedule data from Yasno API
-        group: Power group (e.g., "2.1")
-
-    Returns:
-        Tuple of (start_time, end_time, is_today) or None if no outage found
-        start_time and end_time are formatted as HH:MM
-        is_today is True if outage is today, False if tomorrow
-    """
-    # Try to get schedule and find next outage for home group
-    next_outage_info = None
+def find_next_outage_for_group(group_id: Optional[str] = 'home') -> Optional[Tuple[str, str, bool]]:
+    """Find next scheduled outage for a specific Yasno group."""
+    if not group_id:
+        return None
     try:
         schedule_data = yasno_client.update()
 
         if schedule_data and YASNO_GROUP_CONFIGS:
-            # Find the group with id='home'
-            home_group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == 'home'), None)
-            if home_group_config:
+            group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == group_id), None)
+            if group_config and group_config.group:
                 try:
-                    next_outage_info = find_next_outage(schedule_data, home_group_config.group)
+                    next_outage_info = find_next_outage(schedule_data, group_config.group)
                     if not next_outage_info:
                         return None
 
                     start_dt, end_dt = next_outage_info
                     start_time = start_dt.strftime('%H:%M')
                     end_time = end_dt.strftime('%H:%M')
-                    
-                    # Determine is_today based on start_dt
-                    # Note: start_dt is timezone-aware (from schedule_tools)
                     now = datetime.now(TIMEZONE)
                     is_today = start_dt.date() == now.date()
-                    
                     return (start_time, end_time, is_today)
-
                 except Exception as e:
-                    logger.error(f"Error finding next outage: {e}")
+                    logger.error(f"Error finding next outage for group {group_id}: {e}")
                     return None
-
             else:
-                logger.warning("No group with id='home' found in YASNO_GROUP_CONFIGS")
+                logger.warning(f"No group with id='{group_id}' found in YASNO_GROUP_CONFIGS")
     except Exception as e:
-        logger.warning(f"Could not fetch next outage info: {e}")
-    
+        logger.warning(f"Could not fetch next outage info for group {group_id}: {e}")
+
     return None
+
+
+def find_next_outage_home() -> Optional[Tuple[str, str, bool]]:
+    """Find the next scheduled outage (home group only)"""
+    return find_next_outage_for_group('home')
 
 
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
     return jsonify({'status': 'ok'}), 200
+
+
+def _handle_power_status_update(status: str, location_id: Optional[str] = None, is_legacy_post: bool = False):
+    """Internal helper to process power status update for any location."""
+    if status not in ['on', 'off']:
+        return jsonify({'error': 'Status must be "on" or "off"'}), 400
+
+    loc = get_location_config(location_id)
+    if not loc:
+        return jsonify({'error': f'Unknown location: {location_id}'}), 404
+
+    target_file = None if loc.id == 'home' else loc.status_file
+
+    # Check if status actually changed
+    current_status = read_power_status(target_file)
+    status_changed = current_status.get('status', '').lower() != status if current_status else True
+
+    # Calculate duration if we have a previous timestamp AND status changed
+    duration_text = None
+    if status_changed and current_status.get('timestamp'):
+        try:
+            current_timestamp = datetime.now(TIMEZONE)
+            previous_timestamp = current_status['timestamp']
+
+            # Ensure both timestamps are timezone-aware
+            if previous_timestamp.tzinfo is None:
+                # Timestamp is naive, assume it's in our configured timezone
+                previous_timestamp = TIMEZONE.localize(previous_timestamp)
+            elif previous_timestamp.tzinfo != current_timestamp.tzinfo:
+                # Different timezone, convert to our configured timezone
+                previous_timestamp = previous_timestamp.astimezone(TIMEZONE)
+
+            duration = current_timestamp - previous_timestamp
+
+            # Ignore negative durations (clock skew/system time changes)
+            if duration.total_seconds() < 0:
+                logger.warning(f"Negative duration detected ({duration.total_seconds()}s), skipping duration display")
+                duration_text = None
+            else:
+                duration_text = DurationFormatter.format_duration(duration)
+                logger.info(f"Duration calculated for {loc.id}: {duration_text}")
+
+        except (TypeError, ValueError) as e:
+            logger.error(f"Error calculating duration (timestamp issue): {e}")
+            duration_text = None
+        except Exception as e:
+            logger.error(f"Unexpected error calculating duration: {e}", exc_info=True)
+            duration_text = None
+
+    # Only write status to file if status changed (to preserve timestamp)
+    if status_changed:
+        if not write_power_status(status, target_file):
+            return jsonify({'error': 'Failed to write status to file'}), 500
+        
+        # Record event in DB
+        stats_service.record_event(status, datetime.now(TIMEZONE), location=loc.id)
+
+    # Only send notification if status changed
+    notification_sent = False
+    if status_changed:
+        timestamp = datetime.now(TIMEZONE)
+        loc_display_name = None if loc.id == 'home' else loc.name
+
+        if status == 'on':
+            next_outage_info = find_next_outage_for_group(loc.yasno_group) if loc.yasno_group else None
+
+            if next_outage_info:
+                start_time, end_time, is_today = next_outage_info
+                message = PowerStatusFormatter.format_power_on_message(
+                    timestamp,
+                    duration_text,
+                    next_outage_start=start_time,
+                    next_outage_end=end_time,
+                    is_today=is_today,
+                    location_name=loc_display_name
+                )
+            else:
+                message = PowerStatusFormatter.format_power_on_message(
+                    timestamp,
+                    duration_text,
+                    location_name=loc_display_name
+                )
+        else:
+            message = PowerStatusFormatter.format_power_off_message(
+                timestamp,
+                duration_text,
+                location_name=loc_display_name
+            )
+
+        loop = get_or_create_eventloop()
+        if loc.channel_id and loc.channel_id != telegram_bot.channel_id:
+            coro = telegram_bot.send_message(message, chat_id=loc.channel_id)
+        else:
+            coro = telegram_bot.send_message(message)
+        loop.run_until_complete(coro)
+        notification_sent = True
+        logger.info(f"Status changed to {status} for {loc.id}, notification sent")
+    else:
+        logger.info(f"Status unchanged ({status}) for {loc.id}, no notification sent")
+
+    response_data = {
+        'status': 'success',
+        'power_status': status,
+        'status_changed': status_changed,
+        'notification_sent': notification_sent
+    }
+    if not is_legacy_post:
+        response_data['location'] = loc.id
+
+    return jsonify(response_data), 200
 
 
 @app.route('/power-status', methods=['POST'])
@@ -166,7 +266,8 @@ def update_power_status():
 
     Expected JSON body:
     {
-        "status": "on" or "off"
+        "status": "on" or "off",
+        "location": "home" (optional)
     }
 
     Requires Authorization header with API token
@@ -179,93 +280,40 @@ def update_power_status():
         if not data or 'status' not in data:
             return jsonify({'error': 'Missing required field: status'}), 400
 
-        status = data['status'].lower()
+        status = data['status'].lower() if isinstance(data['status'], str) else str(data['status']).lower()
+        loc_id = data.get('location')
+        is_legacy = (loc_id is None or loc_id.lower() == 'home')
 
-        if status not in ['on', 'off']:
-            return jsonify({'error': 'Status must be "on" or "off"'}), 400
-
-        # Check if status actually changed
-        current_status = read_power_status()
-        status_changed = current_status.get('status', '').lower() != status if current_status else True
-
-        # Calculate duration if we have a previous timestamp AND status changed
-        duration_text = None
-        if status_changed and current_status.get('timestamp'):
-            try:
-                current_timestamp = datetime.now(TIMEZONE)
-                previous_timestamp = current_status['timestamp']
-
-                # Ensure both timestamps are timezone-aware
-                if previous_timestamp.tzinfo is None:
-                    # Timestamp is naive, assume it's in our configured timezone
-                    previous_timestamp = TIMEZONE.localize(previous_timestamp)
-                elif previous_timestamp.tzinfo != current_timestamp.tzinfo:
-                    # Different timezone, convert to our configured timezone
-                    previous_timestamp = previous_timestamp.astimezone(TIMEZONE)
-
-                duration = current_timestamp - previous_timestamp
-
-                # Ignore negative durations (clock skew/system time changes)
-                if duration.total_seconds() < 0:
-                    logger.warning(f"Negative duration detected ({duration.total_seconds()}s), skipping duration display")
-                    duration_text = None
-                else:
-                    duration_text = DurationFormatter.format_duration(duration)
-                    logger.info(f"Duration calculated: {duration_text}")
-
-            except (TypeError, ValueError) as e:
-                logger.error(f"Error calculating duration (timestamp issue): {e}")
-                duration_text = None
-            except Exception as e:
-                logger.error(f"Unexpected error calculating duration: {e}", exc_info=True)
-                duration_text = None
-
-        # Only write status to file if status changed (to preserve timestamp)
-        if status_changed:
-            if not write_power_status(status):
-                return jsonify({'error': 'Failed to write status to file'}), 500
-            
-            # Record event in DB
-            stats_service.record_event(status, datetime.now(TIMEZONE))
-
-        # Only send notification if status changed
-        notification_sent = False
-        if status_changed:
-            timestamp = datetime.now(TIMEZONE)
-
-            if status == 'on':
-                next_outage_info = find_next_outage_home()
-
-                if next_outage_info:
-                    start_time, end_time, is_today = next_outage_info
-                    message = PowerStatusFormatter.format_power_on_message(
-                        timestamp,
-                        duration_text,
-                        next_outage_start=start_time,
-                        next_outage_end=end_time,
-                        is_today=is_today
-                    )
-                else:
-                    message = PowerStatusFormatter.format_power_on_message(timestamp, duration_text)
-            else:
-                message = PowerStatusFormatter.format_power_off_message(timestamp, duration_text)
-
-            loop = get_or_create_eventloop()
-            loop.run_until_complete(telegram_bot.send_message(message))
-            notification_sent = True
-            logger.info(f"Status changed to {status}, notification sent")
-        else:
-            logger.info(f"Status unchanged ({status}), no notification sent")
-
-        return jsonify({
-            'status': 'success',
-            'power_status': status,
-            'status_changed': status_changed,
-            'notification_sent': notification_sent
-        }), 200
+        return _handle_power_status_update(status, loc_id, is_legacy_post=is_legacy)
 
     except Exception as e:
         logger.error(f"Error updating power status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/power-status/<location_id>', methods=['POST'])
+@require_api_token
+def update_location_power_status(location_id: str):
+    """
+    Update power status for a specific location.
+
+    Expected JSON body:
+    {
+        "status": "on" or "off"
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data or 'status' not in data:
+            return jsonify({'error': 'Missing required field: status'}), 400
+
+        status = data['status'].lower() if isinstance(data['status'], str) else str(data['status']).lower()
+
+        return _handle_power_status_update(status, location_id, is_legacy_post=False)
+
+    except Exception as e:
+        logger.error(f"Error updating power status for location {location_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -273,7 +321,7 @@ def update_power_status():
 @require_api_token
 def get_power_status():
     """
-    Get current power status
+    Get current power status for default location (home)
 
     Requires Authorization header with API token
     """
@@ -282,6 +330,59 @@ def get_power_status():
         return jsonify(status), 200
     except Exception as e:
         logger.error(f"Error getting power status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/power-status/<location_id>', methods=['GET'])
+@require_api_token
+def get_location_power_status(location_id: str):
+    """
+    Get current power status for a specific location
+
+    Requires Authorization header with API token
+    """
+    try:
+        loc = get_location_config(location_id)
+        if not loc:
+            return jsonify({'error': f'Unknown location: {location_id}'}), 404
+
+        target_file = None if loc.id == 'home' else loc.status_file
+        status = read_power_status(target_file)
+        return jsonify({
+            'location': loc.id,
+            'name': loc.name,
+            'status': status.get('status'),
+            'last_updated': status.get('last_updated'),
+            'timestamp': status.get('timestamp').isoformat() if status.get('timestamp') else None
+        }), 200
+    except Exception as e:
+        logger.error(f"Error getting power status for location {location_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/locations', methods=['GET'])
+@require_api_token
+def list_locations():
+    """
+    List all configured locations with their current status
+
+    Requires Authorization header with API token
+    """
+    try:
+        result = []
+        for loc in LOCATIONS.values():
+            target_file = None if loc.id == 'home' else loc.status_file
+            st = read_power_status(target_file)
+            result.append({
+                'id': loc.id,
+                'name': loc.name,
+                'status': st.get('status'),
+                'last_updated': st.get('last_updated'),
+                'yasno_group': loc.yasno_group
+            })
+        return jsonify({'locations': result}), 200
+    except Exception as e:
+        logger.error(f"Error listing locations: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/schedule-history/<group_id>', methods=['GET'])

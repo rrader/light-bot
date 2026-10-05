@@ -7,3 +7,4 @@ class PowerEvent:
     id: int
     timestamp: datetime
     status: str
+    location: str = "home"

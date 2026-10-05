@@ -11,7 +11,8 @@ class PowerStatusFormatter:
         duration_text: Optional[str] = None,
         next_outage_start: Optional[str] = None,
         next_outage_end: Optional[str] = None,
-        is_today: bool = True
+        is_today: bool = True,
+        location_name: Optional[str] = None
     ) -> str:
         """
         Format message for when power comes back on
@@ -22,11 +23,13 @@ class PowerStatusFormatter:
             next_outage_start: Next outage start time (e.g., "14:00")
             next_outage_end: Next outage end time (e.g., "16:00")
             is_today: Whether the next outage is today or tomorrow
+            location_name: Optional location display name (e.g. "Вінниця")
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
+        header = f"⚡️ <b>Світло з'явилось ({location_name})!</b> ⚡️" if location_name else "⚡️ <b>Світло з'явилось!</b> ⚡️"
 
         message = (
-            "⚡️ <b>Світло з'явилось!</b> ⚡️\n\n"
+            f"{header}\n\n"
             f"🕐 Час: {kyiv_time}\n"
         )
 
@@ -40,18 +43,24 @@ class PowerStatusFormatter:
         return message
 
     @staticmethod
-    def format_power_off_message(timestamp: datetime, duration_text: Optional[str] = None) -> str:
+    def format_power_off_message(
+        timestamp: datetime,
+        duration_text: Optional[str] = None,
+        location_name: Optional[str] = None
+    ) -> str:
         """
         Format message for when power goes out
 
         Args:
             timestamp: Current timestamp when power went out
             duration_text: Formatted duration text (e.g., "45 хвилин")
+            location_name: Optional location display name (e.g. "Вінниця")
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
+        header = f"🔴 <b>Світло зникло ({location_name})</b> 🔴" if location_name else "🔴 <b>Світло зникло</b> 🔴"
 
         message = (
-            "🔴 <b>Світло зникло</b> 🔴\n\n"
+            f"{header}\n\n"
             f"🕐 Час: {kyiv_time}\n"
         )
 

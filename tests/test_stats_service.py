@@ -187,3 +187,26 @@ def test_get_stats_initial_state_off(stats_service):
     # Duration: 0
     assert stats['last_7d']['count'] == 0
     assert stats['last_7d']['duration'].total_seconds() == 0
+
+
+def test_record_and_get_events_by_location(stats_service):
+    """Test recording and filtering events by location"""
+    now = datetime.now(TIMEZONE)
+    stats_service.record_event('on', now - timedelta(minutes=10), location='home')
+    stats_service.record_event('off', now - timedelta(minutes=5), location='vinnytsia')
+    stats_service.record_event('on', now, location='vinnytsia')
+
+    # All events
+    all_events = stats_service.get_recent_events(limit=10)
+    assert len(all_events) == 3
+
+    # Filtered by vinnytsia
+    vn_events = stats_service.get_recent_events(limit=10, location='vinnytsia')
+    assert len(vn_events) == 2
+    assert all(e.location == 'vinnytsia' for e in vn_events)
+
+    # Filtered by home
+    home_events = stats_service.get_recent_events(limit=10, location='home')
+    assert len(home_events) == 1
+    assert home_events[0].location == 'home'
+

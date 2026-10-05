@@ -2,12 +2,12 @@ import os
 import json
 import pytz
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Dict, Optional
 
 # Load environment variables from .env file
 load_dotenv()
 
-from light_bot.models.group_config import GroupConfig
+from light_bot.models import GroupConfig, LocationConfig
 
 # Telegram Bot Configuration
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -38,6 +38,60 @@ if DATA_DIR and DATA_DIR != '.':
 
 # Timezone Configuration
 TIMEZONE = pytz.timezone(os.getenv('TIMEZONE', 'Europe/Kyiv'))
+
+# Multi-Location Power Monitoring Configuration
+_locations_str = os.getenv('LOCATIONS', '').strip()
+LOCATIONS: Dict[str, LocationConfig] = {}
+
+if _locations_str:
+    try:
+        _loc_data = json.loads(_locations_str)
+        if isinstance(_loc_data, list):
+            for item in _loc_data:
+                if isinstance(item, dict) and item.get('id'):
+                    lid = item['id'].strip().lower()
+                    loc = LocationConfig(
+                        id=lid,
+                        name=item.get('name', lid.capitalize()),
+                        status_file=item.get('status_file') or (WATCHDOG_STATUS_FILE if lid == 'home' else os.path.join(DATA_DIR, f"watchdog_status_{lid}.txt") if DATA_DIR != '.' else f"watchdog_status_{lid}.txt"),
+                        channel_id=item.get('channel_id') or TELEGRAM_CHANNEL_ID,
+                        yasno_group=item.get('yasno_group')
+                    )
+                    LOCATIONS[lid] = loc
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error parsing LOCATIONS: {e}")
+
+# Default fallback locations
+if 'home' not in LOCATIONS:
+    LOCATIONS['home'] = LocationConfig(
+        id='home',
+        name=os.getenv('LOCATION_NAME_HOME', 'Дім'),
+        status_file=WATCHDOG_STATUS_FILE,
+        channel_id=TELEGRAM_CHANNEL_ID,
+        yasno_group='home'
+    )
+
+if 'vinnytsia' not in LOCATIONS:
+    _vn_status_file = os.getenv(
+        'WATCHDOG_STATUS_FILE_VINNYTSIA',
+        os.path.join(DATA_DIR, 'watchdog_status_vinnytsia.txt') if DATA_DIR != '.' else 'watchdog_status_vinnytsia.txt'
+    )
+    _vn_channel = os.getenv('TELEGRAM_CHANNEL_ID_VINNYTSIA') or TELEGRAM_CHANNEL_ID
+    LOCATIONS['vinnytsia'] = LocationConfig(
+        id='vinnytsia',
+        name=os.getenv('LOCATION_NAME_VINNYTSIA', 'Вінниця'),
+        status_file=_vn_status_file,
+        channel_id=_vn_channel,
+        yasno_group=None
+    )
+
+
+def get_location_config(location_id: Optional[str]) -> Optional[LocationConfig]:
+    """Get LocationConfig by id, handling aliases (home/kyiv/default)."""
+    if not location_id or location_id.lower() in ('home', 'kyiv', 'default'):
+        return LOCATIONS.get('home')
+    return LOCATIONS.get(location_id.lower())
 
 # Yasno Schedule Configuration
 # For E2E testing with mock server (None in production = use official Yasno API)

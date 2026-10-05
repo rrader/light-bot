@@ -189,6 +189,81 @@ Response:
 }
 ```
 
+### Multi-Location Support
+
+You can monitor multiple locations (e.g. `home` and `vinnytsia`). The legacy endpoints without a location identifier continue to serve `home` with 100% backward compatibility.
+
+#### Update Power Status for Location
+
+```bash
+POST /power-status/<location_id>
+# Or: POST /power-status with JSON {"status": "on", "location": "<location_id>"}
+Authorization: your_api_token_here
+Content-Type: application/json
+
+{
+  "status": "on"
+}
+```
+
+Response:
+```json
+{
+  "status": "success",
+  "power_status": "on",
+  "status_changed": true,
+  "notification_sent": true,
+  "location": "vinnytsia"
+}
+```
+
+#### Get Power Status for Location
+
+```bash
+GET /power-status/<location_id>
+Authorization: your_api_token_here
+```
+
+Response:
+```json
+{
+  "location": "vinnytsia",
+  "name": "Вінниця",
+  "status": "on",
+  "last_updated": "Last updated: 2026-10-05T12:34:56.789012+03:00",
+  "timestamp": "2026-10-05T12:34:56.789012+03:00"
+}
+```
+
+#### List All Locations
+
+```bash
+GET /locations
+Authorization: your_api_token_here
+```
+
+Response:
+```json
+{
+  "locations": [
+    {
+      "id": "home",
+      "name": "Дім",
+      "status": "on",
+      "last_updated": "Last updated: 2026-10-05T12:00:00+03:00",
+      "yasno_group": "home"
+    },
+    {
+      "id": "vinnytsia",
+      "name": "Вінниця",
+      "status": "on",
+      "last_updated": "Last updated: 2026-10-05T12:30:00+03:00",
+      "yasno_group": null
+    }
+  ]
+}
+```
+
 ## Project Structure
 
 ```
