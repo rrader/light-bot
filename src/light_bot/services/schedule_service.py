@@ -77,10 +77,14 @@ class ScheduleService:
             stats_service=self.stats_service,
         )
 
+        # Composite schedule client supporting multiple providers (Yasno, VOE)
+        from light_bot.api.composite_client import CompositeScheduleClient
+        self.composite_client = CompositeScheduleClient(YASNO_GROUP_CONFIGS)
+
         # For backward compatibility, expose the first group sender
         self.group_sender = self.multi_group_manager.get_sender(YASNO_GROUP_CONFIGS[0].id)
 
-    async def _get_cached_schedule(self) -> Optional[YasnoScheduleResponse]:
+    async def _get_cached_schedule(self):
         """Get cached schedule if still valid, otherwise fetch new data
 
         Cache is considered valid if it's less than SCHEDULE_CHECK_INTERVAL old.
@@ -106,29 +110,25 @@ class ScheduleService:
 
             # Fetch fresh data
             logger.debug("Fetching fresh schedule data from API")
-            schedule_data = yasno_client.update()
+            schedule_data = self.composite_client.update()
 
             if schedule_data:
                 self._cached_schedule = schedule_data
                 self._cache_timestamp = now
                 logger.debug("Schedule cache updated")
                 for group_config in YASNO_GROUP_CONFIGS:
-                    if group_config.id == "home":
-                        # Serialize schedule data to JSON
-                        # YasnoScheduleResponse is not a Pydantic model, so we need to manually serialize
-                        group_schedule = schedule_data.get_group(group_config.group)
-                        if group_schedule:
-                            # GroupSchedule is a Pydantic model, so we can use model_dump()
-                            schedule_dict = group_schedule.model_dump(mode='json')
-                            schedule_json = json.dumps(schedule_dict, default=str)
-                        else:
-                            schedule_json = json.dumps({"error": "group not found"})
-                        
-                        self.stats_service.record_schedule_history(
-                            group_id=group_config.id,
-                            schedule_text=schedule_json,
-                            timestamp=now,
-                        )
+                    group_schedule = schedule_data.get_group(group_config.group, city=group_config.city)
+                    if group_schedule:
+                        schedule_dict = group_schedule.model_dump(mode='json')
+                        schedule_json = json.dumps(schedule_dict, default=str)
+                    else:
+                        schedule_json = json.dumps({"error": "group not found"})
+                    
+                    self.stats_service.record_schedule_history(
+                        group_id=group_config.id,
+                        schedule_text=schedule_json,
+                        timestamp=now,
+                    )
             else:
                 logger.warning("Failed to fetch schedule data, cache invalidated")
                 self._cached_schedule = None

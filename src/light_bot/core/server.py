@@ -129,31 +129,39 @@ def read_power_status(file_path: Optional[str] = None):
 
 
 def find_next_outage_for_group(group_id: Optional[str] = 'home') -> Optional[Tuple[str, str, bool]]:
-    """Find next scheduled outage for a specific Yasno group."""
+    """Find next scheduled outage for a specific group (Yasno or VOE)."""
     if not group_id:
         return None
     try:
-        schedule_data = yasno_client.update()
+        group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == group_id), None)
+        if not group_config:
+            logger.warning(f"No group with id='{group_id}' found in YASNO_GROUP_CONFIGS")
+            return None
 
-        if schedule_data and YASNO_GROUP_CONFIGS:
-            group_config = next((g for g in YASNO_GROUP_CONFIGS if g.id == group_id), None)
-            if group_config and group_config.group:
-                try:
-                    next_outage_info = find_next_outage(schedule_data, group_config.group)
-                    if not next_outage_info:
-                        return None
+        # Fetch schedule from the appropriate provider
+        if getattr(group_config, 'provider', None) == 'voe' or group_config.city.lower() in ('vinnytsia', 'voe'):
+            from light_bot.api.voe import client as voe_client
+            schedule_data = voe_client.update()
+        else:
+            schedule_data = yasno_client.update()
 
-                    start_dt, end_dt = next_outage_info
-                    start_time = start_dt.strftime('%H:%M')
-                    end_time = end_dt.strftime('%H:%M')
-                    now = datetime.now(TIMEZONE)
-                    is_today = start_dt.date() == now.date()
-                    return (start_time, end_time, is_today)
-                except Exception as e:
-                    logger.error(f"Error finding next outage for group {group_id}: {e}")
+        if schedule_data and group_config.group:
+            try:
+                next_outage_info = find_next_outage(schedule_data, group_config.group, city=group_config.city)
+                if not next_outage_info:
                     return None
-            else:
-                logger.warning(f"No group with id='{group_id}' found in YASNO_GROUP_CONFIGS")
+
+                start_dt, end_dt = next_outage_info
+                start_time = start_dt.strftime('%H:%M')
+                end_time = end_dt.strftime('%H:%M')
+                now = datetime.now(TIMEZONE)
+                is_today = start_dt.date() == now.date()
+                return (start_time, end_time, is_today)
+            except Exception as e:
+                logger.error(f"Error finding next outage for group {group_id}: {e}")
+                return None
+        else:
+            logger.warning(f"Group '{group_id}' has no group number configured")
     except Exception as e:
         logger.warning(f"Could not fetch next outage info for group {group_id}: {e}")
 

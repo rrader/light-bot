@@ -37,17 +37,28 @@ class ScheduleFormatter:
         """Format city name for display in Ukrainian
 
         Args:
-            city: City name in English (e.g., "kiev", "dnipro")
+            city: City name in English (e.g., "kiev", "dnipro", "vinnytsia")
 
         Returns:
-            City name in Ukrainian (e.g., "Київ", "Дніпро")
+            City name in Ukrainian (e.g., "Київ", "Дніпро", "Вінниця")
         """
         city_map = {
             "kiev": "Київ",
             "kyiv": "Київ",
             "dnipro": "Дніпро",
+            "vinnytsia": "Вінниця",
+            "voe": "Вінниця",
         }
         return city_map.get(city.lower(), city.capitalize())
+
+    @staticmethod
+    def _get_bot_footer(channel: Optional[str] = None, city: str = "kiev") -> str:
+        """Get footer bot handle based on channel or city"""
+        if channel and str(channel).startswith("@"):
+            return f"🤖 {channel}"
+        if city.lower() in ("vinnytsia", "voe"):
+            return "🤖 @vinnytsia_kalichanska_4"
+        return "🤖 @power_po2"
 
     @staticmethod
     def format_schedule_message(
@@ -56,17 +67,19 @@ class ScheduleFormatter:
         city: str = "kiev",
         for_tomorrow: bool = False,
         change_detected: bool = False,
-        change_explanation: Optional[str] = None
+        change_explanation: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> str:
         """Format complete schedule message for Telegram
 
         Args:
             schedule_data: Schedule data from API
             group: Power group number
-            city: City name (e.g., "kiev", "lviv")
+            city: City name (e.g., "kiev", "lviv", "vinnytsia")
             for_tomorrow: Whether this is tomorrow's schedule
             change_detected: Whether this is a change notification
             change_explanation: Optional AI-generated explanation of changes
+            channel: Optional Telegram channel username
         """
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
@@ -74,7 +87,7 @@ class ScheduleFormatter:
         # Determine day context
         day_word = "завтра" if for_tomorrow else "сьогодні"
 
-        group_schedule = schedule_data.get_group(group)
+        group_schedule = schedule_data.get_group(group, city=city) if hasattr(schedule_data, 'get_group') else None
         if not group_schedule:
             return f"❌ Група {group} не знайдена в графіку"
 
@@ -86,6 +99,7 @@ class ScheduleFormatter:
 
         # Format city name
         city_name = ScheduleFormatter._format_city_name(city)
+        footer = ScheduleFormatter._get_bot_footer(channel, city)
 
         # Handle emergency shutdowns
         if day_schedule.status == "EmergencyShutdowns":
@@ -95,7 +109,7 @@ class ScheduleFormatter:
                 f"📅 {weekday}, {date_str}\n\n"
                 f"⚠️ <b>Графіки не застосовуються</b>\n\n"
                 f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
-                f"🤖 @power_po2"
+                f"{footer}"
             )
             return message
 
@@ -136,7 +150,7 @@ class ScheduleFormatter:
             f"<b>Планові відключення:</b>\n"
             f"{outages_text}\n\n"
             f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
-            f"🤖 @power_po2"
+            f"{footer}"
         )
 
         return message
@@ -146,12 +160,14 @@ class ScheduleFormatter:
         outage_start: datetime,
         outage_end: datetime,
         group: str,
-        city: str = "kiev"
+        city: str = "kiev",
+        channel: Optional[str] = None,
     ) -> str:
         """Format outage warning message for Telegram"""
         start_str = outage_start.strftime('%H:%M')
         end_str = outage_end.strftime('%H:%M')
         city_name = ScheduleFormatter._format_city_name(city)
+        footer = ScheduleFormatter._get_bot_footer(channel, city)
 
         # Always show "30 minutes" for consistency (warning is sent at 30±5 min window)
         now = datetime.now(TIMEZONE)
@@ -163,7 +179,7 @@ class ScheduleFormatter:
             f"<b>Заплановане включення:</b> {end_str}\n\n"
             f"⚡️ З обережністю користуйтесь ліфтами та зарядіть пристрої\n\n"
             f"🕐 Надіслано: {now.strftime('%H:%M:%S')}\n\n"
-            f"🤖 @power_po2"
+            f"{footer}"
         )
 
         return message

@@ -18,27 +18,34 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 ## Architecture
 - **Remote Server**:
   - Flask API + Telegram bot (receives status updates, sends power status notifications)
-  - Schedule Service (fetches Yasno schedules, sends daily notifications, detects changes)
-- **Local Router**: Bash script monitoring 2 hosts with 3-check threshold
+  - Multi-Provider Schedule Service (supports both Yasno for Kyiv and VOE for Vinnytsia)
+  - Composite client coordinates schedules across regions and routes notifications to respective channels
+- **Local Routers**:
+  - Kyiv: UDR7 router running `monitor.sh`
+  - Vinnytsia: Keenetic Duo router running `monitor_keenetic.sh`
 - **Communication**: HTTP POST with Bearer token authentication
-- **Storage**: File-based persistence with timestamp in Kyiv timezone
+- **Storage**: File-based persistence with timestamp in Kyiv timezone, SQLite history
 - **Schedule Notifications**:
-  - Evening (20:00): Tomorrow's power outage schedule
+  - Evening (18:00–23:00): Tomorrow's power outage schedule as soon as published
   - Hourly checks: Detect and notify about schedule changes during the day
   - Advance warnings: 30-minute advance notice before scheduled outages
+  - Power restoration info: includes next scheduled outage time on power-on alerts
 
 ## Key Files
 - `main.py` - Entry point, starts Flask server and schedule monitoring
-- `bot.py` - TelegramChannelBot class for channel messaging
-- `server.py` - Flask API endpoints with token auth
-- `schedule_service.py` - Schedule monitoring and notification service
-  - `ScheduleFormatter` - Formats Yasno schedule data for Telegram
-  - `ScheduleService` - Monitors schedules and sends notifications
-- `monitor.sh` - Local monitoring script (pings + API calls)
-- `config.py` - Environment variable management
-- `yasno_hass/` - Yasno Power Outage API client (adapted from kuzin2006/yasno_hass)
-  - `api.py` - API client for fetching power outage schedules
-  - `models.py` - Pydantic models for API data
+- `src/light_bot/core/bot.py` - TelegramChannelBot class for channel messaging
+- `src/light_bot/core/server.py` - Flask API endpoints with token auth and multi-location power status
+- `src/light_bot/services/schedule_service.py` - Coordinates schedule monitoring loops and composite client
+- `src/light_bot/services/multi_group_schedule_manager.py` - Coordinates per-group senders
+- `src/light_bot/services/group_schedule_sender.py` - Handles change detection, rollover and warnings per group
+- `src/light_bot/api/yasno/` - Yasno Power Outage API client (Kyiv / DSO 902)
+- `src/light_bot/api/voe/` - Vinnytsiaoblenergo (VOE) schedule client (parses GPV format from community data)
+- `src/light_bot/api/composite_client.py` - Composite client aggregating schedules across providers by city/group
+- `src/light_bot/formatters/schedule_formatter.py` - Formats schedule and warning messages with per-city and channel footers
+- `src/light_bot/formatters/power_status_formatter.py` - Formats power status change messages
+- `monitor.sh` - UDR monitoring script (Kyiv)
+- `scripts/monitor_keenetic.sh` - Keenetic monitoring script (Vinnytsia)
+- `config.py` - Environment variable management and location/group configurations
 - `tests/` - Comprehensive unit tests
 
 ## Running the Project

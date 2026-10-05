@@ -9,6 +9,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 from light_bot.api.yasno import YasnoScheduleResponse
+from light_bot.api.yasno.models import GroupSchedule
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import TIMEZONE
@@ -221,6 +222,15 @@ class GroupScheduleSender:
             logger.error(f"[{self.group_config.group}] Error writing last warning file: {e}")
             raise
 
+    def _get_group_schedule(self, schedule_data) -> Optional[GroupSchedule]:
+        """Safely fetch GroupSchedule using both group and city"""
+        if not schedule_data or not hasattr(schedule_data, 'get_group'):
+            return None
+        try:
+            return schedule_data.get_group(self.group_config.group, city=self.group_config.city)
+        except TypeError:
+            return schedule_data.get_group(self.group_config.group)
+
     # ========== Schedule Hash and Data Methods ==========
 
     def _compute_schedule_hash(self, schedule_data: YasnoScheduleResponse, for_tomorrow: bool = False) -> Optional[str]:
@@ -229,7 +239,7 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group_config.group)
+            group_schedule = self._get_group_schedule(schedule_data)
             if not group_schedule:
                 return None
 
@@ -260,7 +270,7 @@ class GroupScheduleSender:
             if not schedule_data:
                 return None
 
-            group_schedule = schedule_data.get_group(self.group_config.group)
+            group_schedule = self._get_group_schedule(schedule_data)
             if not group_schedule:
                 return None
 
@@ -423,7 +433,7 @@ class GroupScheduleSender:
         """
         try:
             # Get group schedule once for both stats and processing
-            group_schedule = schedule_data.get_group(self.group_config.group)
+            group_schedule = self._get_group_schedule(schedule_data)
             
             # Record history before sending
             if self.stats_service and group_schedule:
@@ -456,7 +466,8 @@ class GroupScheduleSender:
                 city=self.group_config.city,
                 for_tomorrow=for_tomorrow,
                 change_detected=change_detected,
-                change_explanation=change_explanation
+                change_explanation=change_explanation,
+                channel=self.group_config.channel,
             )
 
             logger.info(f"[{self.group_config.group}] Formatted message:\n{message}")
@@ -547,7 +558,7 @@ class GroupScheduleSender:
                             except Exception as e:
                                 logger.warning(f"[{self.group_config.group}] Failed to generate AI explanation: {e}")
                 else:
-                    ai_explanation = "¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
+                    ai_explanation = r"¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
 
                 await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
 
@@ -586,7 +597,7 @@ class GroupScheduleSender:
 
             logger.info(f"[{self.group_config.group}] Checking if tomorrow's schedule is ready...")
 
-            group_schedule = schedule_data.get_group(self.group_config.group)
+            group_schedule = self._get_group_schedule(schedule_data)
             if not group_schedule:
                 logger.warning(f"[{self.group_config.group}] Group not found in schedule")
                 return
@@ -665,7 +676,8 @@ class GroupScheduleSender:
                 outage_start,
                 outage_end,
                 self.group_config.group,
-                self.group_config.city
+                self.group_config.city,
+                channel=self.group_config.channel,
             )
 
             await self.bot.send_message(
@@ -695,12 +707,12 @@ class GroupScheduleSender:
             logger.debug(f"[{self.group_config.group}] Checking for upcoming outages...")
 
             # Skip warning if we're currently in an outage
-            if is_currently_in_outage(schedule_data, self.group_config.group):
+            if is_currently_in_outage(schedule_data, self.group_config.group, city=self.group_config.city):
                 logger.debug(f"[{self.group_config.group}] Currently in outage, skipping warning for next outage")
                 return
 
             # Find next outage
-            next_outage = find_next_outage(schedule_data, self.group_config.group)
+            next_outage = find_next_outage(schedule_data, self.group_config.group, city=self.group_config.city)
             if not next_outage:
                 logger.debug(f"[{self.group_config.group}] No upcoming outages found")
                 return

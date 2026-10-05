@@ -88,7 +88,7 @@ if 'vinnytsia' not in LOCATIONS:
         name=os.getenv('LOCATION_NAME_VINNYTSIA', 'Вінниця'),
         status_file=_vn_status_file,
         channel_id=_vn_channel,
-        yasno_group=None,
+        yasno_group=os.getenv('SCHEDULE_GROUP_VINNYTSIA', 'vinnytsia'),
         ha_webhook_url=os.getenv('HA_WEBHOOK_URL_VINNYTSIA')
     )
 
@@ -123,6 +123,7 @@ try:
         group_dynamic = item.get('group_dynamic', '').strip() or None  # Convert empty string to None
         city = item.get('city', '').strip()
         channel = item.get('channel', '').strip() or None
+        provider = item.get('provider', '').strip() or None
         chat_id = item.get('chat_id', '') or None
         if chat_id:
             chat_id = int(chat_id)
@@ -139,15 +140,14 @@ try:
             group_dynamic=group_dynamic,
             city=city,
             channel=channel,
-            chat_id=chat_id
+            chat_id=chat_id,
+            provider=provider
         )
         
         # Resolve dynamic groups immediately at startup
         _, _ = config.resolve_group()  # Unpack tuple, ignore change status at startup
         
         YASNO_GROUP_CONFIGS.append(config)
-
-    print(YASNO_GROUP_CONFIGS)
 
     if not YASNO_GROUP_CONFIGS:
         raise ValueError("YASNO_GROUPS must contain at least one group configuration")
