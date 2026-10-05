@@ -21,6 +21,7 @@ TARGET_IP="${SMART_SOCKET_IP_VINNYTSIA:-${TARGET_IP:-192.168.1.93}}"
 API_URL="${API_URL_PROD:-https://light.rmn.pp.ua/power-status}"
 ENDPOINT_URL="${API_URL%/}/$LOCATION"
 API_TOKEN="${API_TOKEN:-your_api_token_here}"
+HA_WEBHOOK_URL="${HA_WEBHOOK_URL:-https://ha.rmn.pp.ua/api/webhook/power_status_update_vinnytsia_3b7e92}"
 
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"
 PING_TIMEOUT="${PING_TIMEOUT:-2}"
@@ -51,11 +52,19 @@ send_status() {
 
     if [ "$http_code" = "200" ]; then
         log "Successfully updated status to $status (HTTP $http_code)"
-        return 0
     else
         log "Failed to send status (HTTP $http_code): $body"
-        return 1
     fi
+
+    # Trigger dedicated Home Assistant Vinnytsia webhook for instant HA update
+    if [ -n "$HA_WEBHOOK_URL" ]; then
+        log "Triggering dedicated Home Assistant webhook for $LOCATION..."
+        curl -s -m 5 -X POST "$HA_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"location\": \"$LOCATION\", \"status\": \"$status\"}" > /dev/null 2>&1 &
+    fi
+
+    [ "$http_code" = "200" ] && return 0 || return 1
 }
 
 run_daemon() {

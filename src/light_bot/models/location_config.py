@@ -10,6 +10,7 @@ class LocationConfig:
     status_file: str
     channel_id: Optional[str] = None
     yasno_group: Optional[str] = None
+    ha_webhook_url: Optional[str] = None
 
     def __post_init__(self):
         if not self.id:

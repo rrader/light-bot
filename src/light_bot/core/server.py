@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import threading
+import requests
 from datetime import datetime
 from functools import wraps
 from typing import Optional, Tuple
@@ -11,7 +13,7 @@ from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
-from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS, get_location_config
+from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS, get_location_config, HA_WEBHOOK_URL
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
 from light_bot.core.stats_blueprint import create_stats_blueprint
@@ -58,6 +60,27 @@ def require_api_token(f):
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+def notify_ha_webhook(loc, status: str, timestamp: datetime):
+    """Notify dedicated Home Assistant webhook about power status change with low latency."""
+    webhook_url = getattr(loc, 'ha_webhook_url', None)
+    if not webhook_url:
+        return
+
+    def _send():
+        try:
+            payload = {
+                'location': loc.id,
+                'status': status,
+                'timestamp': timestamp.isoformat()
+            }
+            resp = requests.post(webhook_url, json=payload, timeout=5)
+            logger.info(f"HA webhook sent to dedicated {loc.id} endpoint ({status}): HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Failed to send HA webhook for {loc.id}: {e}")
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 def write_power_status(status: str, file_path: Optional[str] = None):
@@ -243,6 +266,9 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
         loop.run_until_complete(coro)
         notification_sent = True
         logger.info(f"Status changed to {status} for {loc.id}, notification sent")
+
+        # Notify Home Assistant dedicated webhook
+        notify_ha_webhook(loc, status, timestamp)
     else:
         logger.info(f"Status unchanged ({status}) for {loc.id}, no notification sent")
 

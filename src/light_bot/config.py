@@ -20,6 +20,9 @@ TELEGRAM_API_BASE_URL = os.getenv('TELEGRAM_API_BASE_URL')
 FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
 API_TOKEN = os.getenv('API_TOKEN')
 
+# Home Assistant Webhook Configuration
+HA_WEBHOOK_URL = os.getenv('HA_WEBHOOK_URL')
+
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
 DB_PATH = os.getenv('DB_PATH', 'light_bot.db')
@@ -55,7 +58,8 @@ if _locations_str:
                         name=item.get('name', lid.capitalize()),
                         status_file=item.get('status_file') or (WATCHDOG_STATUS_FILE if lid == 'home' else os.path.join(DATA_DIR, f"watchdog_status_{lid}.txt") if DATA_DIR != '.' else f"watchdog_status_{lid}.txt"),
                         channel_id=item.get('channel_id') or TELEGRAM_CHANNEL_ID,
-                        yasno_group=item.get('yasno_group')
+                        yasno_group=item.get('yasno_group'),
+                        ha_webhook_url=item.get('ha_webhook_url')
                     )
                     LOCATIONS[lid] = loc
     except Exception as e:
@@ -69,7 +73,8 @@ if 'home' not in LOCATIONS:
         name=os.getenv('LOCATION_NAME_HOME', 'Дім'),
         status_file=WATCHDOG_STATUS_FILE,
         channel_id=TELEGRAM_CHANNEL_ID,
-        yasno_group='home'
+        yasno_group='home',
+        ha_webhook_url=os.getenv('HA_WEBHOOK_URL_HOME') or os.getenv('HA_WEBHOOK_URL_KYIV') or os.getenv('HA_WEBHOOK_URL')
     )
 
 if 'vinnytsia' not in LOCATIONS:
@@ -83,7 +88,8 @@ if 'vinnytsia' not in LOCATIONS:
         name=os.getenv('LOCATION_NAME_VINNYTSIA', 'Вінниця'),
         status_file=_vn_status_file,
         channel_id=_vn_channel,
-        yasno_group=None
+        yasno_group=None,
+        ha_webhook_url=os.getenv('HA_WEBHOOK_URL_VINNYTSIA')
     )
 
 
