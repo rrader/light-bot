@@ -52,6 +52,9 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 
 ## Configuration
 Key environment variables in `.env`:
+- `TELEGRAM_BOT_TOKEN` - Bot token for posting updates
+- `TELEGRAM_CHANNEL_ID` - Default channel for Kyiv power status notifications
+- `TELEGRAM_CHANNEL_ID_VINNYTSIA` - Channel for Vinnytsia power status notifications (`@vinnytsia_kalichanska_4`)
 - `TELEGRAM_SCHEDULE_CHANNEL_ID` - Channel for schedule notifications (can be same as status channel)
 - `YASNO_CITY` - City for schedules (default: kiev)
 - `YASNO_GROUP` - Power group to monitor (default: 2.1)
@@ -59,6 +62,13 @@ Key environment variables in `.env`:
 - `SCHEDULE_EVENING_HOUR` - Hour to send tomorrow's schedule (default: 20)
 - `OUTAGE_WARNING_MINUTES` - Minutes before outage to send warning (default: 30)
 - `OUTAGE_WARNING_CHECK_INTERVAL` - How often to check for upcoming outages in seconds (default: 300)
+
+### Home Assistant Instant Webhook Updates (Zero-Polling)
+To eliminate latency from HA poll intervals, `light-bot` triggers HA webhooks upon status changes:
+- `HA_WEBHOOK_URL_KYIV` (or `HA_WEBHOOK_URL_HOME`) - Webhook for Kyiv power status updates (`https://ha.rmn.pp.ua/api/webhook/power_status_update_kyiv_89a1c4`).
+- `HA_WEBHOOK_URL_VINNYTSIA` - Webhook for Vinnytsia power status updates (`https://ha.rmn.pp.ua/api/webhook/power_status_update_vinnytsia_3b7e92`).
+
+**Strict Webhook Isolation Rule:** Never combine or route multiple locations through a single webhook URL. Each location MUST have its own independent webhook ID and HA automation to prevent crosstalk or invalid state overwrites.
 
 ## UDR Credentials
 
@@ -100,6 +110,18 @@ sshpass -p "$UDR_PASSWORD" ssh -o StrictHostKeyChecking=no ${UDR_USER}@${UDR_HOS
 ```
 
 Note: `light-bot-monitor.service` in the repo uses `REPLACE_WITH_TOKEN` / `REPLACE_WITH_UDR_API_KEY` placeholders — fill in the real values from `.udr-credentials` or `.env` before deploying, or edit directly on the router.
+
+## Deploying monitor_keenetic.sh in Vinnytsia (KN-2110)
+
+The script runs on the Keenetic Duo router in Vinnytsia under Entware:
+- Script location: `/opt/etc/power-monitor/monitor_keenetic.sh` (source: `scripts/monitor_keenetic.sh`)
+- Init script: `/opt/etc/init.d/S99power-monitor`
+- Env config: `/opt/etc/power-monitor/.env`
+  - Defines `API_URL="https://light.rmn.pp.ua/power-status/vinnytsia"`
+  - Defines `HA_WEBHOOK_URL="https://ha.rmn.pp.ua/api/webhook/power_status_update_vinnytsia_3b7e92"`
+  - Defines `SMART_SOCKET_IP="192.168.1.187"`
+  - Defines `API_TOKEN="..."`
+- On state transitions, `monitor_keenetic.sh` sends updates to both the Light-Bot backend AND directly to Home Assistant's Vinnytsia webhook in the background for sub-second reaction.
 
 ## Dependencies
 - **yasno_hass**: Power outage schedule API client adapted from [kuzin2006/yasno_hass](https://github.com/kuzin2006/yasno_hass) - originally a Home Assistant integration, modified to work as a standalone module for fetching Ukrainian power grid outage schedules from Yasno API
