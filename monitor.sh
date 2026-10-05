@@ -3,10 +3,19 @@
 source .env
 
 # Configuration
-SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.1.152}"
-AC1_IP="${AC1_IP:-192.168.1.77}"
-AC2_IP="${AC2_IP:-192.168.1.94}"
-AC3_IP="${AC3_IP:-192.168.1.206}"
+LOCATION="${1:-${LOCATION:-home}}"
+
+if [ "$LOCATION" = "vinnytsia" ]; then
+    PING_TARGETS="${PING_TARGETS:-${SMART_SOCKET_IP_VINNYTSIA:-192.168.1.93}}"
+else
+    # Default home targets (backward compatible with original variables)
+    SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.1.152}"
+    AC1_IP="${AC1_IP:-192.168.1.77}"
+    AC2_IP="${AC2_IP:-192.168.1.94}"
+    AC3_IP="${AC3_IP:-192.168.1.206}"
+    PING_TARGETS="${PING_TARGETS:-$SMART_SOCKET_IP $AC1_IP $AC2_IP $AC3_IP}"
+fi
+
 TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
 API_URL_PROD="https://light.rmn.pp.ua/power-status"
 API_URL_STAGING="https://light-staging.rmn.pp.ua/power-status"
@@ -31,7 +40,7 @@ log() {
 
 # Function to check if any ping target is reachable
 check_host() {
-    for ip in "$SMART_SOCKET_IP" "$AC1_IP" "$AC2_IP" "$AC3_IP"; do
+    for ip in $PING_TARGETS; do
         if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$ip" > /dev/null 2>&1; then
             return 0  # At least one host is up
         fi
@@ -52,8 +61,16 @@ send_status() {
     local status=$1
     local success=0
 
+    # Determine endpoint based on location
+    local target_url_prod="$API_URL_PROD"
+    local target_url_staging="$API_URL_STAGING"
+    if [ "$LOCATION" != "home" ] && [ -n "$LOCATION" ]; then
+        target_url_prod="${API_URL_PROD%/}/$LOCATION"
+        target_url_staging="${API_URL_STAGING%/}/$LOCATION"
+    fi
+
     # Send to production
-    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_PROD" \
+    response=$(curl -s -w "\n%{http_code}" -X POST "$target_url_prod" \
         -H "Authorization: $API_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}")
@@ -62,14 +79,14 @@ send_status() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -eq 200 ]; then
-        log "${GREEN}✓${NC} [PROD] Status sent successfully: $status"
+        log "${GREEN}✓${NC} [PROD] Status sent successfully for $LOCATION: $status"
         success=1
     else
         log "${RED}✗${NC} [PROD] Failed to send status. HTTP code: $http_code, Response: $body"
     fi
 
     # Send to staging
-    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_STAGING" \
+    response=$(curl -s -w "\n%{http_code}" -X POST "$target_url_staging" \
         -H "Authorization: $API_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}")
@@ -78,7 +95,7 @@ send_status() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -eq 200 ]; then
-        log "${GREEN}✓${NC} [STAGING] Status sent successfully: $status"
+        log "${GREEN}✓${NC} [STAGING] Status sent successfully for $LOCATION: $status"
         success=1
     else
         log "${RED}✗${NC} [STAGING] Failed to send status. HTTP code: $http_code, Response: $body"
