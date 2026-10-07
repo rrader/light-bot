@@ -24,18 +24,24 @@ API_TOKEN="${API_TOKEN:-your_api_token_here}"
 HA_WEBHOOK_URL="${HA_WEBHOOK_URL:-https://ha.rmn.pp.ua/api/webhook/power_status_update_vinnytsia_3b7e92}"
 
 CHECK_INTERVAL="${CHECK_INTERVAL:-5}"
-PING_TIMEOUT="${PING_TIMEOUT:-2}"
-PING_COUNT="${PING_COUNT:-1}"
+PING_TIMEOUT="${PING_TIMEOUT:-1}"
+PING_COUNT="${PING_COUNT:-3}"
 CONSECUTIVE_CHECKS="${CONSECUTIVE_CHECKS:-3}"
+CONSECUTIVE_CHECKS_ON="${CONSECUTIVE_CHECKS_ON:-$CONSECUTIVE_CHECKS}"
+CONSECUTIVE_CHECKS_OFF="${CONSECUTIVE_CHECKS_OFF:-6}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
 check_host() {
-    # BusyBox ping syntax
-    ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$TARGET_IP" > /dev/null 2>&1
-    return $?
+    # BusyBox ping syntax: return 0 if at least one target responds
+    for ip in $TARGET_IP; do
+        if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$ip" > /dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 send_status() {
@@ -74,14 +80,14 @@ run_daemon() {
     CONSECUTIVE_SUCCESS=0
     CONSECUTIVE_FAIL=0
 
-    log "Starting Keenetic power monitor for $LOCATION (monitoring $TARGET_IP -> $ENDPOINT_URL)..."
+    log "Starting Keenetic power monitor for $LOCATION (monitoring $TARGET_IP -> $ENDPOINT_URL | pings: $PING_COUNT, on: $CONSECUTIVE_CHECKS_ON, off: $CONSECUTIVE_CHECKS_OFF)..."
 
     while true; do
         if check_host; then
             CONSECUTIVE_FAIL=0
             CONSECUTIVE_SUCCESS=$((CONSECUTIVE_SUCCESS + 1))
             
-            if [ "$CONSECUTIVE_SUCCESS" -ge "$CONSECUTIVE_CHECKS" ] && [ "$CURRENT_STATUS" != "on" ]; then
+            if [ "$CONSECUTIVE_SUCCESS" -ge "$CONSECUTIVE_CHECKS_ON" ] && [ "$CURRENT_STATUS" != "on" ]; then
                 log "Device $TARGET_IP is ONLINE (confirmed $CONSECUTIVE_SUCCESS times)"
                 CURRENT_STATUS="on"
                 send_status "on"
@@ -90,7 +96,7 @@ run_daemon() {
             CONSECUTIVE_SUCCESS=0
             CONSECUTIVE_FAIL=$((CONSECUTIVE_FAIL + 1))
             
-            if [ "$CONSECUTIVE_FAIL" -ge "$CONSECUTIVE_CHECKS" ] && [ "$CURRENT_STATUS" != "off" ]; then
+            if [ "$CONSECUTIVE_FAIL" -ge "$CONSECUTIVE_CHECKS_OFF" ] && [ "$CURRENT_STATUS" != "off" ]; then
                 log "Device $TARGET_IP is OFFLINE (confirmed $CONSECUTIVE_FAIL times)"
                 CURRENT_STATUS="off"
                 send_status "off"
