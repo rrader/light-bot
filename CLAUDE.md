@@ -49,8 +49,19 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 - `tests/` - Comprehensive unit tests
 
 ## Running the Project
-- **Remote Server**: `docker-compose up -d` or `python main.py`
 - **Local Monitor**: `./monitor.sh` (with API_TOKEN env var set)
+- **Local Dev / Standalone**: `docker compose up -d` or `python main.py`
+
+## Production Deployment on Monica
+
+In production on `monica`, `light-bot` runs as part of the unified `/root/services` Docker Compose stack under the `prod-public` profile. It must be connected to the `services_default` network so that Caddy reverse-proxy can reach it on port 5000:
+
+- **Correct deploy / restart command:**
+  ```bash
+  cd /root/services && docker compose --profile prod-public up -d --build light-bot
+  ```
+- **Volume mount:** Always uses the host bind mount `/root/services/light-bot/data:/data` (or `./data:/data`) to preserve persistent state files across container recreations (`watchdog_status_vinnytsia.txt`, hashes, and sqlite db).
+- **Network caveat:** NEVER run standalone `docker compose up -d` solely inside `/root/services/light-bot` without `--project-directory /root/services` — otherwise it spawns in isolated `light-bot_default` network, Caddy fails with `502 Bad Gateway`, and Home Assistant's REST poller mistakenly reports an outage.
 
 ## Testing
 - `pytest tests/ -v` - Run all tests
