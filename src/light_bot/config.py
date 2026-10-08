@@ -175,7 +175,7 @@ GROUP_RESOLUTION_INTERVAL = int(os.getenv('GROUP_RESOLUTION_INTERVAL', 21600))
 
 # OpenAI API Configuration (optional - for AI explanations of schedule changes)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # Optional: OpenAI API key
-OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')  # OpenAI model for explanations
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-6-luna')  # OpenAI model for explanations
 ENABLE_AI_EXPLANATIONS = os.getenv('ENABLE_AI_EXPLANATIONS', 'true').lower() == 'true'  # Enable/disable AI explanations
 
 # Validate required environment variables
