@@ -234,3 +234,26 @@ class TestScheduleFormatterWithAI:
         assert "Поточний час:" not in prompt
         assert "08:00-10:00" in prompt  # Old schedule
         assert "08:00-11:00" in prompt  # New schedule
+
+    def test_compute_detailed_slot_diff_earlier_start(self):
+        """Test detecting when an outage slot starts earlier (e.g. 09:00 -> 08:00)"""
+        explainer = ScheduleChangeExplainer(api_key="test-key", model="gpt-4o-mini")
+        old_slots = [
+            {"start": 0, "end": 210, "type": "Definite"},      # 00:00-03:30
+            {"start": 540, "end": 750, "type": "Definite"},    # 09:00-12:30
+            {"start": 1080, "end": 1290, "type": "Definite"},  # 18:00-21:30
+        ]
+        new_slots = [
+            {"start": 0, "end": 210, "type": "Definite"},      # 00:00-03:30
+            {"start": 480, "end": 750, "type": "Definite"},    # 08:00-12:30
+            {"start": 1080, "end": 1290, "type": "Definite"},  # 18:00-21:30
+        ]
+        diffs = explainer._compute_detailed_slot_diff(old_slots, new_slots)
+        assert len(diffs) == 1
+        assert "09:00-12:30 -> 08:00-12:30" in diffs[0]
+        assert "почнеться на 1 год раніше: з 08:00 (було з 09:00)" in diffs[0]
+        assert "кінець без змін (12:30)" in diffs[0]
+
+        diff_text = explainer._format_slots_diff_for_prompt(old_slots, new_slots)
+        assert "почнеться на 1 год раніше" in diff_text
+        assert "збільшилась на 1.0 год" in diff_text

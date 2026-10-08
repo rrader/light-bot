@@ -65,6 +65,83 @@ class ScheduleChangeExplainer:
         total_slots = len(formatted)
         return f"{slots_text} | Всього: {total_text} без світла, кількість відключень: {total_slots}"
     
+    @staticmethod
+    def _minutes_to_str(m: int) -> str:
+        """Convert minutes from midnight to HH:MM format"""
+        return f"{m // 60:02d}:{m % 60:02d}"
+
+    def _compute_detailed_slot_diff(self, old_slots: list, new_slots: list) -> list:
+        """Compute exact changes between old and new outage intervals"""
+        old_intervals = [
+            (s['start'], s['end'])
+            for s in old_slots
+            if s.get('type') != 'NotPlanned'
+        ]
+        new_intervals = [
+            (s['start'], s['end'])
+            for s in new_slots
+            if s.get('type') != 'NotPlanned'
+        ]
+
+        matched_old = set()
+        matched_new = set()
+        diffs = []
+
+        # Find overlapping pairs
+        for i, (os, oe) in enumerate(old_intervals):
+            best_match = None
+            best_overlap = 0
+            for j, (ns, ne) in enumerate(new_intervals):
+                if j in matched_new:
+                    continue
+                overlap = max(0, min(oe, ne) - max(os, ns))
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_match = j
+
+            if best_match is not None and best_overlap > 0:
+                matched_old.add(i)
+                matched_new.add(best_match)
+                ns, ne = new_intervals[best_match]
+                if (os, oe) == (ns, ne):
+                    continue
+
+                parts = []
+                if os != ns:
+                    diff_m = abs(ns - os)
+                    diff_h = diff_m / 60
+                    h_str = f"{diff_h:.0f} год" if diff_h == int(diff_h) else f"{diff_h:.1f} год"
+                    if ns < os:
+                        parts.append(f"почнеться на {h_str} раніше: з {self._minutes_to_str(ns)} (було з {self._minutes_to_str(os)})")
+                    else:
+                        parts.append(f"почнеться на {h_str} пізніше: з {self._minutes_to_str(ns)} (було з {self._minutes_to_str(os)})")
+
+                if oe != ne:
+                    diff_m = abs(ne - oe)
+                    diff_h = diff_m / 60
+                    h_str = f"{diff_h:.0f} год" if diff_h == int(diff_h) else f"{diff_h:.1f} год"
+                    if ne > oe:
+                        parts.append(f"закінчиться на {h_str} пізніше: до {self._minutes_to_str(ne)} (було до {self._minutes_to_str(oe)})")
+                    else:
+                        parts.append(f"закінчиться на {h_str} раніше: до {self._minutes_to_str(ne)} (було до {self._minutes_to_str(oe)})")
+
+                if os == ns:
+                    parts.append(f"початок без змін ({self._minutes_to_str(os)})")
+                if oe == ne:
+                    parts.append(f"кінець без змін ({self._minutes_to_str(oe)})")
+
+                diffs.append(f"Слот {self._minutes_to_str(os)}-{self._minutes_to_str(oe)} -> {self._minutes_to_str(ns)}-{self._minutes_to_str(ne)}: " + "; ".join(parts))
+
+        for i, (os, oe) in enumerate(old_intervals):
+            if i not in matched_old:
+                diffs.append(f"Скасовано відключення {self._minutes_to_str(os)}-{self._minutes_to_str(oe)}")
+
+        for j, (ns, ne) in enumerate(new_intervals):
+            if j not in matched_new:
+                diffs.append(f"Додано нове відключення {self._minutes_to_str(ns)}-{self._minutes_to_str(ne)}")
+
+        return diffs
+
     def _format_slots_diff_for_prompt(self, old_slots: list, new_slots: list) -> str:
         """Format the difference between old and new slots for the prompt
 
@@ -78,6 +155,9 @@ class ScheduleChangeExplainer:
         if not old_slots or not new_slots:
             return ""
 
+        detailed_diffs = self._compute_detailed_slot_diff(old_slots, new_slots)
+        detailed_text = "\n".join(f"- {d}" for d in detailed_diffs) if detailed_diffs else "Слоти без змін"
+
         old_slots_count = len([slot for slot in old_slots if slot['type'] != "NotPlanned"])
         new_slots_count = len([slot for slot in new_slots if slot['type'] != "NotPlanned"])
         diff_slots_count = new_slots_count - old_slots_count
@@ -90,11 +170,14 @@ class ScheduleChangeExplainer:
         new_slots_duration = sum([slot['end'] - slot['start'] for slot in new_slots if slot['type'] != "NotPlanned"]) / 60
         diff_slots_duration = new_slots_duration - old_slots_duration
         if diff_slots_duration == 0:
-            diff_slots_duration_text = "Тривалість відключень не змінилась"
+            diff_slots_duration_text = "Загальна тривалість: без змін"
         else:
-            diff_slots_duration_text = f"Тривалість відключень збільшилась на {diff_slots_duration} годин" if diff_slots_duration > 0 else f"Тривалість відключень зменшилась на {-diff_slots_duration} годин"
+            diff_slots_duration_text = f"Загальна тривалість: збільшилась на {diff_slots_duration} год" if diff_slots_duration > 0 else f"Загальна тривалість: зменшилась на {-diff_slots_duration} год"
 
-        return f"{diff_slots_count_text}\n{diff_slots_duration_text}"
+        summary_parts = [p for p in [diff_slots_count_text, diff_slots_duration_text] if p]
+        summary_text = ", ".join(summary_parts)
+
+        return f"Конкретні зміни в слотах:\n{detailed_text}\nПідсумок: {summary_text}"
 
     def _build_prompt(self, old_schedule: dict, new_schedule: dict, current_time_minutes: Optional[int] = None) -> str:
         """Build the prompt for OpenAI API
@@ -124,8 +207,12 @@ class ScheduleChangeExplainer:
 ВАЖЛИВО:
 - Пиши ДУЖЕ коротко (1-2 речення максимум!)
 - Говори просто, як друзям у месенджері
-- Фокусуйся на змінах конкретних слотів, а не на загальній тривалості
-- Уникай слів "зміна полягає в тому що", "це означає", просто кажи що змінилось
+- Фокусуйся на конкретних змінах слотів.
+- ПРАВИЛО ТОЧНОСТІ ЧАСУ:
+  * Якщо змінився початок відключення (наприклад, з 09:00 на 08:00) — пиши: 'почнеться раніше: з 08:00 замість 09:00' або 'почнеться пізніше'.
+  * Якщо змінився кінець відключення (наприклад, з 18:00 на 20:00) — пиши: 'подовжили до 20:00 (було до 18:00)' або 'закінчиться раніше'.
+  * СУВОРО ЗАБОРОНЕНО писати 'подовжили до [кінця]', якщо змінився лише початок слота!
+  * СУВОРО ЗАБОРОНЕНО вигадувати час, якого немає у наданих даних!
 - Почни з емоджі:
   🎉 - якщо менше відключень або коротші (добре для людей)
   😞 - якщо більше відключень або довші (погано для людей)
@@ -139,11 +226,12 @@ class ScheduleChangeExplainer:
 - одне з відключень вдень (коли їх декілька)
 
 Приклади ГАРНИХ відповідей:{' (для сьогодні)' if current_time_minutes is not None else ' (для завтра)'}
+{"😞 Ранкове відключення розпочнеться на годину раніше: з 08:00 замість 09:00 (до 12:30). Ще на 1 годину більше без світла." if current_time_minutes is not None else "😞 Завтрашнє ранкове відключення розпочнеться на годину раніше: з 08:00 замість 09:00 (до 12:30)."}
 {"😞 Вечірнє відключення подовжили до 20:00 (було до 18:00)" if current_time_minutes is not None else "😞 Завтрашнє вечірнє відключення подовжили до 20:00 (було до 18:00)"}
 {"🎉 Скоротили вечірнє відключення на пів години!" if current_time_minutes is not None else "🎉 Скоротили вечірнє відключення завтра на пів години!"}
 {"🤷 Перенесли відключення з ранку на обід: тепер БЕЗ світла 14:00-16:00 замість 12:00-14:00" if current_time_minutes is not None else "🤷 Перенесли відключення з завтрашнього ранку на обід: 14:00-16:00 замість 12:00-14:00"}
 {"😞 Додалось ранкове відключення 8:00-10:00, ще 2 години без світла." if current_time_minutes is not None else "😞 На завтра додалось ранкове відключення 8:00-10:00, ще 2 години без світла."}
-{"🎉 Скоротили ранкове відключення: 08:00-9:30 замість 07:00-9:30. На 1 годину менше без світла!" if current_time_minutes is not None else "🎉 Скоротили завтрашнє ранкове відключення: 08:00-9:30 замість 07:00-9:30. На 1 годину менше без світла!"}
+{"🎉 Скоротили ранкове відключення: почнеться о 08:00 замість 07:00 (до 09:30). На 1 годину менше без світла!" if current_time_minutes is not None else "🎉 Скоротили завтрашнє ранкове відключення: почнеться о 08:00 замість 07:00 (до 09:30)."}
 {"🎉 Відмінили нічне відключення 02:00-04:00!" if current_time_minutes is not None else "🎉 Відмінили завтрашнє нічне відключення 02:00-04:00!"}
 
 Приклади ПОГАНИХ відповідей:
@@ -156,7 +244,7 @@ class ScheduleChangeExplainer:
 Старий графік: {old_slots_text}
 Новий графік: {new_slots_text}
 
-Зміни: {diff_text}
+{diff_text}
 
 Твоя відповідь (лише емоджі + коротке пояснення):"""
 
