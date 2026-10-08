@@ -3,7 +3,8 @@ from typing import List, Optional
 
 from light_bot.api.yasno import YasnoScheduleResponse, PowerSlot, SlotType
 from light_bot.config import TIMEZONE
-from light_bot.core.schedule_tools import get_outage_slots
+from light_bot.core.schedule_tools import get_outage_slots, _get_group_schedule
+from light_bot.formatters.duration_formatter import DurationFormatter
 
 
 class ScheduleFormatter:
@@ -17,8 +18,20 @@ class ScheduleFormatter:
         return f"{hours:02d}:{mins:02d}"
 
     @staticmethod
+    def format_total_outage_time(minutes: int) -> str:
+        """Format total outage minutes into Ukrainian hours and minutes"""
+        hours = minutes // 60
+        mins = minutes % 60
+        parts = []
+        if hours > 0:
+            parts.append(DurationFormatter._pluralize_hours(hours))
+        if mins > 0:
+            parts.append(DurationFormatter._pluralize_minutes(mins))
+        return " ".join(parts) if parts else "0 годин"
+
+    @staticmethod
     def format_outage_slots(slots: List[PowerSlot]) -> str:
-        """Format outage slots into readable time ranges"""
+        """Format outage slots into readable time ranges and total duration"""
         outage_slots = get_outage_slots(slots)
 
         if not outage_slots:
@@ -29,6 +42,10 @@ class ScheduleFormatter:
             start_str = ScheduleFormatter.minutes_to_time(slot.start)
             end_str = ScheduleFormatter.minutes_to_time(slot.end)
             formatted.append(f"⚡️ {start_str} - {end_str}")
+
+        total_minutes = sum(slot.end - slot.start for slot in outage_slots)
+        total_time_str = ScheduleFormatter.format_total_outage_time(total_minutes)
+        formatted.append(f"\n⌛️ Всього без світла: <b>{total_time_str}</b>")
 
         return "\n".join(formatted)
 
@@ -87,7 +104,7 @@ class ScheduleFormatter:
         # Determine day context
         day_word = "завтра" if for_tomorrow else "сьогодні"
 
-        group_schedule = schedule_data.get_group(group, city=city) if hasattr(schedule_data, 'get_group') else None
+        group_schedule = _get_group_schedule(schedule_data, group, city=city)
         if not group_schedule:
             return f"❌ Група {group} не знайдена в графіку"
 

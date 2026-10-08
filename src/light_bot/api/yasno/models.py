@@ -1,5 +1,5 @@
 # Data models for Yasno Blackout API
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
 from pydantic import BaseModel
@@ -47,11 +47,14 @@ class GroupSchedule(BaseModel):
 class YasnoScheduleResponse:
     """Full API response with all groups"""
 
-    def __init__(self, data: Dict[str, dict]):
-        """Initialize with raw dict data"""
+    def __init__(self, data: Dict[str, Any]):
+        """Initialize with raw dict data or GroupSchedule objects"""
         self._data = {}
         for group_key, group_data in data.items():
-            self._data[group_key] = GroupSchedule(**group_data)
+            if isinstance(group_data, GroupSchedule):
+                self._data[group_key] = group_data
+            else:
+                self._data[group_key] = GroupSchedule(**group_data)
 
     def get_group(self, group: str) -> Optional[GroupSchedule]:
         """Get schedule for a specific group"""
