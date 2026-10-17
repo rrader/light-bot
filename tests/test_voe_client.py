@@ -80,3 +80,104 @@ def test_group_config_provider_autodetect():
 
     c_custom = GroupConfig(id="custom", group="3.1", city="kiev", provider="voe")
     assert c_custom.provider == "voe"
+
+
+def test_parse_halfhour_slots():
+    # All on (code 1)
+    slots_map_on = {f"{h:02d}:{m:02d}": 1 for h in range(24) for m in (0, 30)}
+    slots = VOEAPIClient._parse_halfhour_slots(slots_map_on)
+    assert len(slots) == 1
+    assert slots[0].start == 0
+    assert slots[0].end == 1440
+    assert slots[0].type == SlotType.NOT_PLANNED
+
+    # Outage 14:00 - 16:00 (slots 14:00, 14:30, 15:00, 15:30 = 2)
+    slots_map_outage = slots_map_on.copy()
+    for t in ["14:00", "14:30", "15:00", "15:30"]:
+        slots_map_outage[t] = 2
+    slots = VOEAPIClient._parse_halfhour_slots(slots_map_outage)
+    assert len(slots) == 3
+    assert slots[0].start == 0
+    assert slots[0].end == 14 * 60
+    assert slots[0].type == SlotType.NOT_PLANNED
+
+    assert slots[1].start == 14 * 60
+    assert slots[1].end == 16 * 60
+    assert slots[1].type == SlotType.DEFINITE
+
+    assert slots[2].start == 16 * 60
+    assert slots[2].end == 1440
+    assert slots[2].type == SlotType.NOT_PLANNED
+
+
+def test_parse_svitlo_proxy():
+    client = VOEAPIClient()
+    mock_json = {
+        "date_today": "2026-10-17",
+        "date_tomorrow": "2026-10-18",
+        "regions": [
+            {
+                "cpu": "vinnitska-oblast",
+                "name_ua": "Вінницька",
+                "schedule": {
+                    "2.1": {
+                        "2026-10-17": {
+                            **{f"{h:02d}:{m:02d}": 1 for h in range(24) for m in (0, 30)},
+                            "14:00": 2, "14:30": 2, "15:00": 2, "15:30": 2
+                        },
+                        "2026-10-18": {
+                            f"{h:02d}:{m:02d}": 0 for h in range(24) for m in (0, 30)
+                        }
+                    }
+                }
+            }
+        ]
+    }
+
+    resp = client._parse_svitlo_proxy(mock_json)
+    assert resp is not None
+
+    g21 = resp.get_group("2.1")
+    assert g21 is not None
+    assert g21.today.status == ScheduleStatus.SCHEDULE_APPLIES
+    assert len(g21.today.slots) == 3
+    assert g21.today.slots[1].start == 14 * 60
+    assert g21.today.slots[1].end == 16 * 60
+    assert g21.today.slots[1].type == SlotType.DEFINITE
+
+    # Tomorrow is all 0 -> WAITING_FOR_SCHEDULE
+    assert g21.tomorrow.status == ScheduleStatus.WAITING_FOR_SCHEDULE
+    assert len(g21.tomorrow.slots) == 1
+    assert g21.tomorrow.slots[0].type == SlotType.NOT_PLANNED
+
+
+def test_update_svitlo_proxy_priority():
+    client = VOEAPIClient(svitlo_proxy_url="http://mock-proxy")
+    mock_json = {
+        "date_today": "2026-10-17",
+        "date_tomorrow": "2026-10-18",
+        "regions": [
+            {
+                "cpu": "vinnitska-oblast",
+                "schedule": {
+                    "2.1": {
+                        "2026-10-17": {f"{h:02d}:{m:02d}": 1 for h in range(24) for m in (0, 30)},
+                        "2026-10-18": {f"{h:02d}:{m:02d}": 0 for h in range(24) for m in (0, 30)}
+                    }
+                }
+            }
+        ]
+    }
+
+    with patch("requests.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_json
+        mock_get.return_value = mock_resp
+
+        res = client.update()
+        assert res is not None
+        assert res.get_group("2.1") is not None
+        assert mock_get.call_count == 1
+        assert mock_get.call_args[0][0] == "http://mock-proxy"
+
