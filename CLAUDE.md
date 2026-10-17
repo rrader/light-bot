@@ -39,7 +39,7 @@ Light Bot is a distributed power status monitoring system that tracks host avail
 - `src/light_bot/services/multi_group_schedule_manager.py` - Coordinates per-group senders
 - `src/light_bot/services/group_schedule_sender.py` - Handles change detection, rollover and warnings per group
 - `src/light_bot/api/yasno/` - Yasno Power Outage API client (Kyiv / DSO 902)
-- `src/light_bot/api/voe/` - Vinnytsiaoblenergo (VOE) schedule client (parses GPV format from community data)
+- `src/light_bot/api/voe/` - Vinnytsiaoblenergo (VOE) schedule client (fetches from Svitlo Proxy API, with fallback to community GPV format)
 - `src/light_bot/api/composite_client.py` - Composite client aggregating schedules across providers by city/group
 - `src/light_bot/formatters/schedule_formatter.py` - Formats schedule and warning messages with per-city and channel footers
 - `src/light_bot/formatters/power_status_formatter.py` - Formats power status change messages
