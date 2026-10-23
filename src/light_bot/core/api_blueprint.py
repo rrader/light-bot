@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Callable
 from flask import Blueprint, jsonify, request, Response
 
-from light_bot.config import LOCATIONS, get_location_config
+from light_bot.config import LOCATIONS, get_location_config, get_group_config, get_actual_group_number
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.services.stats_service import StatsService
 
@@ -532,13 +532,19 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
             target_file = None if not loc or loc.id == 'home' else loc.status_file
             st = read_power_status_fn(target_file)
             ts = st.get('timestamp')
+            group_cfg = get_group_config(loc.yasno_group if loc else 'home')
+            actual_group = group_cfg.group if group_cfg and group_cfg.group else (loc.yasno_group if loc else 'home')
+
             return jsonify({
                 'location': loc.id if loc else 'home',
                 'name': loc.name if loc else 'Дім',
                 'status': st.get('status', 'Unknown'),
                 'last_updated': st.get('last_updated', 'Never'),
                 'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
-                'yasno_group': loc.yasno_group if loc else 'home'
+                'group': actual_group,
+                'group_id': loc.yasno_group if loc else 'home',
+                'yasno_group': actual_group,
+                'city': group_cfg.city if group_cfg else 'kiev'
             }), 200
         except Exception as e:
             logger.error(f"Error getting public power status: {e}")
@@ -559,13 +565,19 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
             target_file = None if loc.id == 'home' else loc.status_file
             st = read_power_status_fn(target_file)
             ts = st.get('timestamp')
+            group_cfg = get_group_config(loc.yasno_group)
+            actual_group = group_cfg.group if group_cfg and group_cfg.group else loc.yasno_group
+
             return jsonify({
                 'location': loc.id,
                 'name': loc.name,
                 'status': st.get('status', 'Unknown'),
                 'last_updated': st.get('last_updated', 'Never'),
                 'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
-                'yasno_group': loc.yasno_group
+                'group': actual_group,
+                'group_id': loc.yasno_group,
+                'yasno_group': actual_group,
+                'city': group_cfg.city if group_cfg else 'kiev'
             }), 200
         except Exception as e:
             logger.error(f"Error getting public power status for {location_id}: {e}")
@@ -580,6 +592,8 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                 target_file = None if loc.id == 'home' else loc.status_file
                 st = read_power_status_fn(target_file)
                 ts = st.get('timestamp')
+                group_cfg = get_group_config(loc.yasno_group)
+                actual_group = group_cfg.group if group_cfg and group_cfg.group else loc.yasno_group
                 result.append({
                     'id': loc.id,
                     'location': loc.id,
@@ -587,7 +601,10 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                     'status': st.get('status', 'Unknown'),
                     'last_updated': st.get('last_updated', 'Never'),
                     'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
-                    'yasno_group': loc.yasno_group
+                    'group': actual_group,
+                    'group_id': loc.yasno_group,
+                    'yasno_group': actual_group,
+                    'city': group_cfg.city if group_cfg else 'kiev'
                 })
             return jsonify({'locations': result}), 200
         except Exception as e:

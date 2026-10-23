@@ -25,8 +25,6 @@ HA_WEBHOOK_URL = os.getenv('HA_WEBHOOK_URL')
 
 # File Configuration
 WATCHDOG_STATUS_FILE = os.getenv('WATCHDOG_STATUS_FILE', 'watchdog_status.txt')
-DB_PATH = os.getenv('DB_PATH', 'light_bot.db')
-
 # Data Directory Configuration
 # Directory for schedule state files (default: current directory)
 DATA_DIR = os.getenv('DATA_DIR', '.').rstrip('/')
@@ -34,6 +32,12 @@ DATA_DIR = os.getenv('DATA_DIR', '.').rstrip('/')
 # Ensure data directory exists
 if DATA_DIR and DATA_DIR != '.':
     os.makedirs(DATA_DIR, exist_ok=True)
+
+# Database Configuration
+# Default to storing sqlite DB inside DATA_DIR if configured (e.g. /data/light_bot.db)
+DB_PATH = os.getenv('DB_PATH')
+if not DB_PATH:
+    DB_PATH = os.path.join(DATA_DIR, 'light_bot.db') if DATA_DIR and DATA_DIR != '.' else 'light_bot.db'
 
 # Note: Individual state file paths are no longer configured here.
 # MultiGroupScheduleManager creates state files automatically with group suffix.
@@ -156,6 +160,24 @@ except json.JSONDecodeError as e:
     raise ValueError(f"YASNO_GROUPS must be valid JSON: {e}")
 except Exception as e:
     raise ValueError(f"Error parsing YASNO_GROUPS: {e}")
+
+
+def get_group_config(group_id: Optional[str]) -> Optional[GroupConfig]:
+    """Get GroupConfig by id (e.g., 'home', 'vinnytsia')."""
+    if not group_id:
+        return None
+    for g in YASNO_GROUP_CONFIGS:
+        if g.id == group_id:
+            return g
+    return None
+
+
+def get_actual_group_number(group_id: Optional[str]) -> Optional[str]:
+    """Get resolved actual group number (e.g., '5.1', '2.1') for a group id or location."""
+    cfg = get_group_config(group_id)
+    if cfg and cfg.group:
+        return cfg.group
+    return group_id
 
 SCHEDULE_CHECK_INTERVAL = int(os.getenv('SCHEDULE_CHECK_INTERVAL', 3600))  # Check every hour
 # Today's schedule monitoring window
