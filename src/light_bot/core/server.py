@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 from functools import wraps
 from typing import Optional, Tuple
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 from light_bot.core.bot import telegram_bot
 from light_bot.core.file_utils import atomic_write_text, read_text
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
@@ -17,14 +17,31 @@ from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GR
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
 from light_bot.core.stats_blueprint import create_stats_blueprint
-from light_bot.core.schedule_history_blueprint import create_schedule_history_blueprint
+from light_bot.core.api_blueprint import create_api_blueprint, LLMS_TXT, OPENAPI_SPEC, SWAGGER_HTML
 
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 stats_service = StatsService(DB_PATH)
 app.register_blueprint(create_stats_blueprint(stats_service))
-app.register_blueprint(create_schedule_history_blueprint(stats_service), url_prefix='/api')
+
+
+@app.route('/llms.txt', methods=['GET'])
+def root_llms_txt():
+    """Root discovery for AI models."""
+    return Response(LLMS_TXT, mimetype='text/plain; charset=utf-8')
+
+
+@app.route('/openapi.json', methods=['GET'])
+def root_openapi():
+    """Root discovery for OpenAPI specification."""
+    return jsonify(OPENAPI_SPEC)
+
+
+@app.route('/docs', methods=['GET'])
+def root_docs():
+    """Root discovery for interactive Swagger UI."""
+    return Response(SWAGGER_HTML, mimetype='text/html')
 
 
 _loop = None
@@ -126,6 +143,10 @@ def read_power_status(file_path: Optional[str] = None):
     except Exception as e:
         logger.error(f"Error reading power status from file ({target_file}): {e}")
         return {'status': 'Error', 'last_updated': str(e), 'timestamp': None}
+
+
+# Register comprehensive public API blueprint under /api
+app.register_blueprint(create_api_blueprint(stats_service, read_power_status), url_prefix='/api')
 
 
 def find_next_outage_for_group(group_id: Optional[str] = 'home') -> Optional[Tuple[str, str, bool]]:
