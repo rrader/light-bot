@@ -613,22 +613,48 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
 
     @api_bp.route('/events', methods=['GET'])
     def public_events():
-        """Get recent power events log. Public, no token required."""
+        """Get power events log. Public, no token required."""
         try:
-            limit = request.args.get('limit', default=50, type=int)
-            limit = max(1, min(limit, 200))
+            limit_param = request.args.get('limit')
+            if limit_param is not None:
+                try:
+                    limit_val = int(limit_param)
+                    limit = None if limit_val <= 0 else min(limit_val, 10000)
+                except ValueError:
+                    limit = 1000
+            else:
+                limit = 1000  # Default to 1000 to cover full history
             location = request.args.get('location', default=None, type=str)
 
-            events = stats_service.get_recent_events(limit=limit, location=location)
-            return jsonify([
-                {
+            # Fetch extra event to compute prev duration for oldest event in slice
+            fetch_limit = (limit + 1) if limit else 10000
+            events = stats_service.get_recent_events(limit=fetch_limit, location=location)
+
+            result = []
+            max_returned = limit if limit else len(events)
+            for i in range(min(len(events), max_returned)):
+                e = events[i]
+                ts_str = e.timestamp.isoformat() if isinstance(e.timestamp, datetime) else str(e.timestamp)
+
+                # Calculate duration of previous state (prev in seconds)
+                prev_duration = None
+                if i + 1 < len(events):
+                    earlier = events[i + 1]
+                    try:
+                        prev_duration = max(0, int((e.timestamp - earlier.timestamp).total_seconds()))
+                    except Exception:
+                        prev_duration = None
+
+                result.append({
                     'id': e.id,
-                    'timestamp': e.timestamp.isoformat() if isinstance(e.timestamp, datetime) else str(e.timestamp),
+                    'timestamp': ts_str,
                     'status': e.status,
-                    'location': e.location
-                }
-                for e in events
-            ]), 200
+                    'location': e.location,
+                    't': ts_str,
+                    'on': (e.status == 'on'),
+                    'prev': prev_duration
+                })
+            return jsonify(result), 200
         except Exception as e:
             logger.error(f"Error getting public events: {e}")
             return jsonify({'error': str(e)}), 500
