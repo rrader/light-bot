@@ -143,3 +143,6 @@ The script runs on the Keenetic Duo router in Vinnytsia under Entware:
 
 ## Dependencies
 - **yasno_hass**: Power outage schedule API client adapted from [kuzin2006/yasno_hass](https://github.com/kuzin2006/yasno_hass) - originally a Home Assistant integration, modified to work as a standalone module for fetching Ukrainian power grid outage schedules from Yasno API
+
+## Agent Skills
+- **Light Bot Skill**: `.agents/skills/light-bot/SKILL.md` contains full architectural instructions, REST API / Swagger docs, 60-group Yasno mapping, zero-leakage security invariants, Home Assistant zero-latency webhook rules, and production deployment on `monica`.
