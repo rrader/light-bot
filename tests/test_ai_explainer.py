@@ -104,8 +104,65 @@ class TestScheduleChangeExplainer:
         # Check API call parameters
         call_kwargs = explainer.client.chat.completions.create.call_args.kwargs
         assert call_kwargs['model'] == 'gpt-4o-mini'
-        assert call_kwargs['max_completion_tokens'] == 150
-        assert call_kwargs['timeout'] == 10.0
+        assert call_kwargs['max_completion_tokens'] == 1000
+        assert call_kwargs['timeout'] == 20.0
+
+    @pytest.mark.asyncio
+    async def test_explain_schedule_change_reasoning_model(self):
+        """Test that reasoning models (e.g. gpt-6-luna) use reasoning_effort=low"""
+        luna_explainer = ScheduleChangeExplainer(api_key="test-api-key", model="gpt-6-luna")
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = "🎉 Скоротили відключення!"
+        luna_explainer.client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        old_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+        new_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+
+        result = await luna_explainer.explain_schedule_change(old_schedule, new_schedule, 720)
+        assert result == "🎉 Скоротили відключення!"
+        call_kwargs = luna_explainer.client.chat.completions.create.call_args.kwargs
+        assert call_kwargs['reasoning_effort'] == 'low'
+
+    @pytest.mark.asyncio
+    async def test_explain_schedule_change_empty_response(self, explainer):
+        """Test that empty completion content returns None and logs warning"""
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = ""
+        mock_response.choices[0].finish_reason = "length"
+        explainer.client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        old_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+        new_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+
+        result = await explainer.explain_schedule_change(old_schedule, new_schedule, 720)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_explain_schedule_change_bad_request_retry(self):
+        """Test retry without reasoning_effort if BadRequestError occurs"""
+        from openai import BadRequestError
+        luna_explainer = ScheduleChangeExplainer(api_key="test-api-key", model="gpt-6-luna")
+        mock_response = Mock()
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message.content = "🎉 Успішно після retry"
+
+        bad_req = BadRequestError(
+            message="Unrecognized request argument supplied: reasoning_effort",
+            response=Mock(status_code=400),
+            body={"message": "Unrecognized request argument supplied: reasoning_effort"}
+        )
+        luna_explainer.client.chat.completions.create = AsyncMock(
+            side_effect=[bad_req, mock_response]
+        )
+
+        old_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+        new_schedule = {"date": "2024-01-15", "status": "ScheduleApplies", "slots": []}
+
+        result = await luna_explainer.explain_schedule_change(old_schedule, new_schedule, 720)
+        assert result == "🎉 Успішно після retry"
+        assert luna_explainer.client.chat.completions.create.call_count == 2
 
     @pytest.mark.asyncio
     async def test_explain_schedule_change_api_error(self, explainer):
