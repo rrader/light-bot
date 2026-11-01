@@ -1,8 +1,7 @@
 """AI-powered schedule change explanations using OpenAI API"""
 import logging
 from typing import Optional
-from openai import AsyncOpenAI
-from openai import OpenAIError
+from openai import AsyncOpenAI, OpenAIError, BadRequestError
 from light_bot.config import OPENAI_API_KEY, OPENAI_MODEL
 import asyncio
 
@@ -12,16 +11,19 @@ logger = logging.getLogger(__name__)
 class ScheduleChangeExplainer:
     """Generate human-readable explanations of schedule changes using OpenAI API"""
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", timeout: float = 20.0, max_completion_tokens: int = 1000):
         """Initialize the explainer with OpenAI API credentials
 
         Args:
             api_key: OpenAI API key
             model: OpenAI model to use (default: gpt-4o-mini)
+            timeout: Request timeout in seconds (default: 20.0)
+            max_completion_tokens: Token limit including reasoning tokens (default: 1000)
         """
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
-        self.timeout = 10.0  # seconds
+        self.timeout = timeout
+        self.max_completion_tokens = max_completion_tokens
 
     def _format_slots_for_prompt(self, slots: list) -> str:
         """Format schedule slots for the prompt
@@ -184,17 +186,41 @@ class ScheduleChangeExplainer:
 
             logger.debug("Requesting AI explanation from OpenAI...")
 
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            create_kwargs = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": "Ти - помічник який пояснює зміни в графіках відключень електроенергії простою українською мовою. ВАЖЛИВО: графіки показують періоди ВІДКЛЮЧЕННЯ (коли світла НЕМАЄ)!"},
                     {"role": "user", "content": prompt}
                 ],
-                max_completion_tokens=150,
-                timeout=self.timeout
-            )
+                "max_completion_tokens": self.max_completion_tokens,
+                "timeout": self.timeout
+            }
 
-            explanation = response.choices[0].message.content.strip()
+            # Enable low reasoning effort for reasoning models (e.g. gpt-6-luna, o1, o3) to respond quickly and concisely
+            if any(kw in self.model.lower() for kw in ("luna", "o1", "o3", "reasoning", "gpt-6")):
+                create_kwargs["reasoning_effort"] = "low"
+
+            try:
+                response = await self.client.chat.completions.create(**create_kwargs)
+            except BadRequestError as e:
+                if "reasoning_effort" in str(e).lower() and "reasoning_effort" in create_kwargs:
+                    logger.warning(f"Model {self.model} does not support reasoning_effort, retrying without it: {e}")
+                    create_kwargs.pop("reasoning_effort", None)
+                    response = await self.client.chat.completions.create(**create_kwargs)
+                else:
+                    raise
+
+            choice = response.choices[0] if response.choices else None
+            raw_content = choice.message.content if choice and choice.message else None
+            explanation = raw_content.strip() if raw_content else ""
+
+            if not explanation:
+                finish_reason = getattr(choice, 'finish_reason', None)
+                usage = getattr(response, 'usage', None)
+                logger.warning(
+                    f"AI explanation was empty (finish_reason={finish_reason}, usage={usage})"
+                )
+                return None
 
             logger.info(f"AI explanation generated successfully ({len(explanation)} chars)")
             logger.debug(f"AI explanation: {explanation}")
