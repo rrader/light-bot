@@ -19,14 +19,14 @@ Light Bot побудований за розподіленою клієнт-се
 
 ```mermaid
 flowchart TD
-    subgraph LocalRouters ["Локальні роутери (Watchdogs)"]
-        UDR["Київ: UniFi Dream Router 7\n(monitor.sh)"]
+    subgraph Sources ["Джерела телеметрії (Watchdogs)"]
+        HA_Rep["Київ: Home Assistant (Synology NAS)\n(вольтметр щитка + розетка бойлера)"]
         KN["Вінниця: Keenetic Duo\n(monitor_keenetic.sh)"]
     end
 
     subgraph ServerMonica ["Сервер monica (Docker / Caddy)"]
         Flask["Flask REST API (порт 5000)\nlight.rmn.pp.ua"]
-        SQLite[("SQLite /data/light_bot.db\n+ Hash State Files")]
+        SQLite[("SQLite /data/light_bot.db\n(power_events + voltage_readings)")]
         MultiGroup["MultiGroupScheduleManager\n(фоновий воркер)"]
         TelegramBot["TelegramChannelBot"]
     end
@@ -42,8 +42,8 @@ flowchart TD
         WebClients["Веб-клієнти / Публічне API\n(po2.kyiv.ua / Swagger UI)"]
     end
 
-    UDR -- "POST /power-status (Bearer)" --> Flask
-    KN -- "POST /power-status (Bearer)" --> Flask
+    HA_Rep -- "POST /power-status (before/after relay + voltage)" --> Flask
+    KN -- "POST /power-status (Bearer legacy)" --> Flask
     Flask --> SQLite
     Flask -- "Миттєві Webhooks" --> HA
     MultiGroup -- "Опитування розкладів" --> Yasno
@@ -53,6 +53,20 @@ flowchart TD
     HA -- "GET /power-status/{location}" --> Flask
     WebClients -- "GET /api/* (CORS)" --> Flask
 ```
+
+### Джерела телеметрії та логіка станів реле:
+Для локації Київ (`home`) моніторинг переведено на Home Assistant:
+- **`before_relay` (до реле):** Zigbee-вольтметр щитка (`sensor.hallway_voltmetr_u_shchitku_napruga`). Фіксує наявність напруги на вході в квартиру та передає числове значення напруги (`voltage`).
+- **`after_relay` (після реле):** Zigbee-розетка бойлера (`sensor.bathroom_boiler_napruga` / `switch.bathroom_boiler`). Фіксує наявність живлення після силового захисного реле квартири (Зубр тощо). Враховується таймаут 35 секунд на `last_reported`, оскільки Zigbee-пристрої не відвалюються в `unavailable` миттєво.
+- **Таблиця станів на сервері:**
+  | `before_relay` | `after_relay` | Резолв статусу | Опис та реакція |
+  |---|---|---|---|
+  | `true` | `true` | `on` | **Світло є** (мережа в нормі, споживачі живляться) |
+  | `true` | `false` | `unstable` | **В мережі нестабільна напруга** (реле відімкнуло навантаження через стрибок або просідання) |
+  | `false` | `true` | 400 error | **Неможливий стан** (відхиляється бекендом) |
+  | `false` | `false` | `off` | **Світла нема** (повне знеструмлення мережі) |
+- **Зворотна сумісність:** локації без розрізнення реле (наприклад, Вінниця) продовжують надсилати стандартне поле `status: "on"|"off"`.
+- **Збереження телеметрії:** кожен запит із напругою та джерелом (`source: "ha"`) фіксується в таблиці `voltage_readings`, а зміни стану — у `power_events`.
 
 ### Основні сервіси та файли
 - **Точка входу**: `main.py` — запускає веб-сервер Flask та фоновий планувальник розкладів.
