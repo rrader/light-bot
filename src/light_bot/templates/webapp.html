@@ -1187,9 +1187,22 @@
                 }
             }
 
+            // Filter out transient noise/glitches (< 2 minutes) where an 'off' or 'unstable' spike immediately reverts
+            const debounced = [];
+            for (let i = 0; i < intervals.length; i++) {
+                const cur = intervals[i];
+                const dur = cur.end - cur.start;
+                // If a transient glitch of 1 minute occurs between two segments of the same status, bridge them
+                if (dur <= 1 && i > 0 && i + 1 < intervals.length && intervals[i - 1].status === intervals[i + 1].status) {
+                    intervals[i - 1].end = cur.end; // expand previous to swallow the glitch
+                    continue;
+                }
+                debounced.push(cur);
+            }
+
             // Merge contiguous identical statuses
             const merged = [];
-            intervals.forEach(inv => {
+            debounced.forEach(inv => {
                 if (inv.end <= inv.start) return;
                 if (merged.length > 0 && merged[merged.length - 1].status === inv.status) {
                     const last = merged[merged.length - 1];
