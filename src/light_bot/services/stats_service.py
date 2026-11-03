@@ -26,14 +26,41 @@ class StatsService:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
                         status TEXT NOT NULL,
-                        location TEXT DEFAULT 'home'
+                        location TEXT DEFAULT 'home',
+                        voltage REAL,
+                        source TEXT,
+                        before_relay INTEGER,
+                        after_relay INTEGER
                     )
                 ''')
-                # Migrate existing table if location column is missing
-                try:
-                    cursor.execute("ALTER TABLE power_events ADD COLUMN location TEXT DEFAULT 'home'")
-                except sqlite3.OperationalError:
-                    pass
+                # Migrate existing table if columns are missing
+                for col_name, col_type in [
+                    ("location", "TEXT DEFAULT 'home'"),
+                    ("voltage", "REAL"),
+                    ("source", "TEXT"),
+                    ("before_relay", "INTEGER"),
+                    ("after_relay", "INTEGER"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE power_events ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS voltage_readings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        location TEXT NOT NULL,
+                        voltage REAL,
+                        before_relay INTEGER,
+                        after_relay INTEGER,
+                        source TEXT
+                    )
+                ''')
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_voltage_readings_loc_ts 
+                    ON voltage_readings(location, timestamp)
+                ''')
 
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS schedule_history (
@@ -94,22 +121,66 @@ class StatsService:
             logger.error(f"Failed to get schedule history for group {group_id}: {e}")
             return []
 
-    def record_event(self, status: str, timestamp: datetime, location: str = 'home'):
+    def record_event(
+        self,
+        status: str,
+        timestamp: datetime,
+        location: str = 'home',
+        voltage: Optional[float] = None,
+        source: Optional[str] = None,
+        before_relay: Optional[bool] = None,
+        after_relay: Optional[bool] = None
+    ):
         """Record a power event"""
         try:
             # Ensure timestamp is ISO format string
             timestamp_str = timestamp.isoformat()
+            before_int = None if before_relay is None else (1 if before_relay else 0)
+            after_int = None if after_relay is None else (1 if after_relay else 0)
             
             with self._get_conn() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'INSERT INTO power_events (timestamp, status, location) VALUES (?, ?, ?)',
-                    (timestamp_str, status, location)
+                    '''INSERT INTO power_events 
+                       (timestamp, status, location, voltage, source, before_relay, after_relay) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (timestamp_str, status, location, voltage, source, before_int, after_int)
                 )
                 conn.commit()
-                logger.info(f"Recorded power event: {status} at {timestamp_str} (location: {location})")
+                logger.info(
+                    f"Recorded power event: {status} at {timestamp_str} "
+                    f"(location: {location}, voltage: {voltage}, source: {source}, "
+                    f"before_relay: {before_relay}, after_relay: {after_relay})"
+                )
         except Exception as e:
             logger.error(f"Failed to record power event: {e}")
+
+    def record_reading(
+        self,
+        timestamp: datetime,
+        location: str = 'home',
+        voltage: Optional[float] = None,
+        before_relay: Optional[bool] = None,
+        after_relay: Optional[bool] = None,
+        source: Optional[str] = None
+    ):
+        """Record a telemetry/voltage reading to voltage_readings table"""
+        try:
+            timestamp_str = timestamp.isoformat()
+            before_int = None if before_relay is None else (1 if before_relay else 0)
+            after_int = None if after_relay is None else (1 if after_relay else 0)
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''INSERT INTO voltage_readings 
+                       (timestamp, location, voltage, before_relay, after_relay, source) 
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (timestamp_str, location, voltage, before_int, after_int, source)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to record voltage reading: {e}")
 
     def get_recent_events(self, limit: int = 10, location: Optional[str] = None) -> List[PowerEvent]:
         """Get recent power events, optionally filtered by location"""
@@ -118,12 +189,14 @@ class StatsService:
                 cursor = conn.cursor()
                 if location:
                     cursor.execute(
-                        'SELECT id, timestamp, status, location FROM power_events WHERE location = ? ORDER BY timestamp DESC LIMIT ?',
+                        '''SELECT id, timestamp, status, location, voltage, source, before_relay, after_relay 
+                           FROM power_events WHERE location = ? ORDER BY timestamp DESC LIMIT ?''',
                         (location, limit)
                     )
                 else:
                     cursor.execute(
-                        'SELECT id, timestamp, status, location FROM power_events ORDER BY timestamp DESC LIMIT ?',
+                        '''SELECT id, timestamp, status, location, voltage, source, before_relay, after_relay 
+                           FROM power_events ORDER BY timestamp DESC LIMIT ?''',
                         (limit,)
                     )
                 rows = cursor.fetchall()
@@ -137,11 +210,20 @@ class StatsService:
                             timestamp = TIMEZONE.localize(timestamp)
                         
                         loc = row[3] if len(row) > 3 and row[3] else 'home'
+                        volt = row[4] if len(row) > 4 and row[4] is not None else None
+                        src = row[5] if len(row) > 5 and row[5] is not None else None
+                        b_rel = bool(row[6]) if len(row) > 6 and row[6] is not None else None
+                        a_rel = bool(row[7]) if len(row) > 7 and row[7] is not None else None
+
                         events.append(PowerEvent(
                             id=row[0],
                             timestamp=timestamp,
                             status=row[2],
-                            location=loc
+                            location=loc,
+                            voltage=volt,
+                            source=src,
+                            before_relay=b_rel,
+                            after_relay=a_rel
                         ))
                     except ValueError:
                         continue

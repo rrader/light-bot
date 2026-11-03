@@ -535,7 +535,7 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
             group_cfg = get_group_config(loc.yasno_group if loc else 'home')
             actual_group = group_cfg.group if group_cfg and group_cfg.group else (loc.yasno_group if loc else 'home')
 
-            return jsonify({
+            resp_data = {
                 'location': loc.id if loc else 'home',
                 'name': loc.name if loc else 'Дім',
                 'status': st.get('status', 'Unknown'),
@@ -545,7 +545,17 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                 'group_id': loc.yasno_group if loc else 'home',
                 'yasno_group': actual_group,
                 'city': group_cfg.city if group_cfg else 'kiev'
-            }), 200
+            }
+            if st.get('voltage') is not None:
+                resp_data['voltage'] = st.get('voltage')
+            if st.get('before_relay') is not None:
+                resp_data['before_relay'] = st.get('before_relay')
+            if st.get('after_relay') is not None:
+                resp_data['after_relay'] = st.get('after_relay')
+            if st.get('source') is not None:
+                resp_data['source'] = st.get('source')
+
+            return jsonify(resp_data), 200
         except Exception as e:
             logger.error(f"Error getting public power status: {e}")
             return jsonify({'error': str(e)}), 500
@@ -568,7 +578,7 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
             group_cfg = get_group_config(loc.yasno_group)
             actual_group = group_cfg.group if group_cfg and group_cfg.group else loc.yasno_group
 
-            return jsonify({
+            resp_data = {
                 'location': loc.id,
                 'name': loc.name,
                 'status': st.get('status', 'Unknown'),
@@ -578,7 +588,17 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                 'group_id': loc.yasno_group,
                 'yasno_group': actual_group,
                 'city': group_cfg.city if group_cfg else 'kiev'
-            }), 200
+            }
+            if st.get('voltage') is not None:
+                resp_data['voltage'] = st.get('voltage')
+            if st.get('before_relay') is not None:
+                resp_data['before_relay'] = st.get('before_relay')
+            if st.get('after_relay') is not None:
+                resp_data['after_relay'] = st.get('after_relay')
+            if st.get('source') is not None:
+                resp_data['source'] = st.get('source')
+
+            return jsonify(resp_data), 200
         except Exception as e:
             logger.error(f"Error getting public power status for {location_id}: {e}")
             return jsonify({'error': str(e)}), 500
@@ -645,7 +665,7 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                     except Exception:
                         prev_duration = None
 
-                result.append({
+                ev_item = {
                     'id': e.id,
                     'timestamp': ts_str,
                     'status': e.status,
@@ -653,7 +673,16 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                     't': ts_str,
                     'on': (e.status == 'on'),
                     'prev': prev_duration
-                })
+                }
+                if e.voltage is not None:
+                    ev_item['voltage'] = e.voltage
+                if e.before_relay is not None:
+                    ev_item['before_relay'] = e.before_relay
+                if e.after_relay is not None:
+                    ev_item['after_relay'] = e.after_relay
+                if e.source is not None:
+                    ev_item['source'] = e.source
+                result.append(ev_item)
             return jsonify(result), 200
         except Exception as e:
             logger.error(f"Error getting public events: {e}")

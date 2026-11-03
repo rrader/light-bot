@@ -12,7 +12,8 @@ class PowerStatusFormatter:
         next_outage_start: Optional[str] = None,
         next_outage_end: Optional[str] = None,
         is_today: bool = True,
-        location_name: Optional[str] = None
+        location_name: Optional[str] = None,
+        voltage: Optional[float] = None
     ) -> str:
         """
         Format message for when power comes back on
@@ -24,6 +25,7 @@ class PowerStatusFormatter:
             next_outage_end: Next outage end time (e.g., "16:00")
             is_today: Whether the next outage is today or tomorrow
             location_name: Optional location display name (e.g. "Вінниця")
+            voltage: Optional line voltage reading (e.g. 228.0)
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
         header = f"⚡️ <b>Світло з'явилось ({location_name})!</b> ⚡️" if location_name else "⚡️ <b>Світло з'явилось!</b> ⚡️"
@@ -32,6 +34,9 @@ class PowerStatusFormatter:
             f"{header}\n\n"
             f"🕐 Час: {kyiv_time}\n"
         )
+
+        if voltage is not None:
+            message += f"⚡️ Напруга: <b>{voltage:.1f} В</b>\n"
 
         if duration_text:
             message += f"⏱ Відключення тривало: <b>{duration_text}</b>\n"
@@ -46,7 +51,8 @@ class PowerStatusFormatter:
     def format_power_off_message(
         timestamp: datetime,
         duration_text: Optional[str] = None,
-        location_name: Optional[str] = None
+        location_name: Optional[str] = None,
+        voltage: Optional[float] = None
     ) -> str:
         """
         Format message for when power goes out
@@ -55,6 +61,7 @@ class PowerStatusFormatter:
             timestamp: Current timestamp when power went out
             duration_text: Formatted duration text (e.g., "45 хвилин")
             location_name: Optional location display name (e.g. "Вінниця")
+            voltage: Optional line voltage reading
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
         header = f"🔴 <b>Світло зникло ({location_name})</b> 🔴" if location_name else "🔴 <b>Світло зникло</b> 🔴"
@@ -64,7 +71,44 @@ class PowerStatusFormatter:
             f"🕐 Час: {kyiv_time}\n"
         )
 
+        if voltage is not None and voltage > 0:
+            message += f"⚡️ Остання напруга: <b>{voltage:.1f} В</b>\n"
+
         if duration_text:
             message += f"⏱ Світло було: <b>{duration_text}</b>"
+
+        return message
+
+    @staticmethod
+    def format_power_unstable_message(
+        timestamp: datetime,
+        duration_text: Optional[str] = None,
+        location_name: Optional[str] = None,
+        voltage: Optional[float] = None
+    ) -> str:
+        """
+        Format message for when grid power is unstable and relay trips
+
+        Args:
+            timestamp: Current timestamp when instability detected
+            duration_text: Formatted duration text of previous state
+            location_name: Optional location display name (e.g. "Вінниця")
+            voltage: Optional line voltage reading
+        """
+        kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
+        header = f"🟡 <b>В мережі нестабільна напруга ({location_name})!</b> 🟡" if location_name else "🟡 <b>В мережі нестабільна напруга!</b> 🟡"
+
+        message = (
+            f"{header}\n\n"
+            f"🕐 Час: {kyiv_time}\n"
+        )
+
+        if voltage is not None:
+            message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
+
+        message += "⚠️ Реле напруги відімкнуло споживачів від мережі.\n"
+
+        if duration_text:
+            message += f"⏱ Попередній стан тривав: <b>{duration_text}</b>"
 
         return message

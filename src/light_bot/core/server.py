@@ -79,7 +79,15 @@ def require_api_token(f):
     return decorated_function
 
 
-def notify_ha_webhook(loc, status: str, timestamp: datetime):
+def notify_ha_webhook(
+    loc,
+    status: str,
+    timestamp: datetime,
+    voltage: Optional[float] = None,
+    before_relay: Optional[bool] = None,
+    after_relay: Optional[bool] = None,
+    source: Optional[str] = None
+):
     """Notify dedicated Home Assistant webhook about power status change with low latency."""
     webhook_url = getattr(loc, 'ha_webhook_url', None)
     if not webhook_url:
@@ -92,6 +100,15 @@ def notify_ha_webhook(loc, status: str, timestamp: datetime):
                 'status': status,
                 'timestamp': timestamp.isoformat()
             }
+            if voltage is not None:
+                payload['voltage'] = voltage
+            if before_relay is not None:
+                payload['before_relay'] = before_relay
+            if after_relay is not None:
+                payload['after_relay'] = after_relay
+            if source is not None:
+                payload['source'] = source
+
             resp = requests.post(webhook_url, json=payload, timeout=5)
             logger.info(f"HA webhook sent to dedicated {loc.id} endpoint ({status}): HTTP {resp.status_code}")
         except Exception as e:
@@ -100,14 +117,33 @@ def notify_ha_webhook(loc, status: str, timestamp: datetime):
     threading.Thread(target=_send, daemon=True).start()
 
 
-def write_power_status(status: str, file_path: Optional[str] = None):
-    """Write power status to file with timestamp in Kyiv timezone"""
+def write_power_status(
+    status: str,
+    file_path: Optional[str] = None,
+    voltage: Optional[float] = None,
+    before_relay: Optional[bool] = None,
+    after_relay: Optional[bool] = None,
+    source: Optional[str] = None
+):
+    """Write power status to file with timestamp and optional telemetry"""
     target_file = file_path or WATCHDOG_STATUS_FILE
     try:
         timestamp = datetime.now(TIMEZONE).isoformat()
-        content = f"{status}\nLast updated: {timestamp}\n"
+        lines = [
+            status,
+            f"Last updated: {timestamp}"
+        ]
+        if voltage is not None:
+            lines.append(f"Voltage: {voltage}")
+        if before_relay is not None:
+            lines.append(f"Before relay: {str(before_relay).lower()}")
+        if after_relay is not None:
+            lines.append(f"After relay: {str(after_relay).lower()}")
+        if source is not None:
+            lines.append(f"Source: {source}")
+        content = "\n".join(lines) + "\n"
         atomic_write_text(target_file, content)
-        logger.info(f"Power status written to file ({target_file}): {status}")
+        logger.info(f"Power status written to file ({target_file}): {status} (voltage={voltage}, source={source})")
         return True
     except Exception as e:
         logger.error(f"Error writing power status to file ({target_file}): {e}")
@@ -115,7 +151,7 @@ def write_power_status(status: str, file_path: Optional[str] = None):
 
 
 def read_power_status(file_path: Optional[str] = None):
-    """Read current power status from file with parsed timestamp"""
+    """Read current power status from file with parsed timestamp and metadata"""
     target_file = file_path or WATCHDOG_STATUS_FILE
     try:
         content = read_text(target_file)
@@ -134,15 +170,53 @@ def read_power_status(file_path: Optional[str] = None):
                     except (ValueError, AttributeError) as e:
                         logger.warning(f"Could not parse timestamp: {e}")
 
-                return {
+                result = {
                     'status': status,
                     'last_updated': timestamp_line,
-                    'timestamp': timestamp_obj
+                    'timestamp': timestamp_obj,
+                    'voltage': None,
+                    'before_relay': None,
+                    'after_relay': None,
+                    'source': None
                 }
-        return {'status': 'Unknown', 'last_updated': 'Never', 'timestamp': None}
+
+                for line in lines[2:]:
+                    line_clean = line.strip()
+                    if line_clean.startswith('Voltage: '):
+                        try:
+                            result['voltage'] = float(line_clean.replace('Voltage: ', ''))
+                        except ValueError:
+                            pass
+                    elif line_clean.startswith('Before relay: '):
+                        val = line_clean.replace('Before relay: ', '').lower()
+                        result['before_relay'] = (val == 'true')
+                    elif line_clean.startswith('After relay: '):
+                        val = line_clean.replace('After relay: ', '').lower()
+                        result['after_relay'] = (val == 'true')
+                    elif line_clean.startswith('Source: '):
+                        result['source'] = line_clean.replace('Source: ', '')
+
+                return result
+        return {
+            'status': 'Unknown',
+            'last_updated': 'Never',
+            'timestamp': None,
+            'voltage': None,
+            'before_relay': None,
+            'after_relay': None,
+            'source': None
+        }
     except Exception as e:
         logger.error(f"Error reading power status from file ({target_file}): {e}")
-        return {'status': 'Error', 'last_updated': str(e), 'timestamp': None}
+        return {
+            'status': 'Error',
+            'last_updated': str(e),
+            'timestamp': None,
+            'voltage': None,
+            'before_relay': None,
+            'after_relay': None,
+            'source': None
+        }
 
 
 # Register comprehensive public API blueprint under /api
@@ -200,16 +274,99 @@ def health():
     return jsonify({'status': 'ok'}), 200
 
 
-def _handle_power_status_update(status: str, location_id: Optional[str] = None, is_legacy_post: bool = False):
+def _parse_power_request(data: dict):
+    """
+    Parse request data supporting:
+    - before_relay / before-relay (bool)
+    - after_relay / after-relay (bool)
+    - voltage / napruga (float)
+    - source (str)
+    - status (str: on, off, unstable)
+    """
+    if not isinstance(data, dict):
+        return None, None, None, None, None, "Expected JSON object"
+
+    voltage_raw = data.get('voltage') if 'voltage' in data else data.get('napruga')
+    voltage = None
+    if voltage_raw is not None:
+        try:
+            voltage = float(voltage_raw)
+        except (ValueError, TypeError):
+            pass
+
+    source = data.get('source')
+    if source is not None:
+        source = str(source).strip()
+
+    def _parse_bool(val):
+        if val is None:
+            return None
+        if isinstance(val, bool):
+            return val
+        s = str(val).lower()
+        if s in ('true', '1', 'on', 'yes'):
+            return True
+        if s in ('false', '0', 'off', 'no'):
+            return False
+        return None
+
+    raw_before = data.get('before_relay') if 'before_relay' in data else data.get('before-relay')
+    raw_after = data.get('after_relay') if 'after_relay' in data else data.get('after-relay')
+
+    before_relay = _parse_bool(raw_before)
+    after_relay = _parse_bool(raw_after)
+
+    # State resolution logic:
+    if before_relay is not None and after_relay is not None:
+        if before_relay and after_relay:
+            resolved_status = 'on'
+        elif before_relay and not after_relay:
+            resolved_status = 'unstable'
+        elif not before_relay and after_relay:
+            # Impossible state
+            return None, voltage, source, before_relay, after_relay, "Impossible state: after_relay cannot be True when before_relay is False"
+        else:
+            resolved_status = 'off'
+    elif 'status' in data:
+        raw_status = data['status'].lower() if isinstance(data['status'], str) else str(data['status']).lower()
+        if raw_status not in ['on', 'off', 'unstable']:
+            return None, voltage, source, before_relay, after_relay, f"Invalid status: {raw_status}. Must be 'on', 'off', or 'unstable'"
+        resolved_status = raw_status
+    else:
+        return None, voltage, source, before_relay, after_relay, "Missing required field: status"
+
+    return resolved_status, voltage, source, before_relay, after_relay, None
+
+
+def _handle_power_status_update(
+    status: str,
+    location_id: Optional[str] = None,
+    is_legacy_post: bool = False,
+    voltage: Optional[float] = None,
+    source: Optional[str] = None,
+    before_relay: Optional[bool] = None,
+    after_relay: Optional[bool] = None
+):
     """Internal helper to process power status update for any location."""
-    if status not in ['on', 'off']:
-        return jsonify({'error': 'Status must be "on" or "off"'}), 400
+    if status not in ['on', 'off', 'unstable']:
+        return jsonify({'error': 'Status must be "on", "off", or "unstable"'}), 400
 
     loc = get_location_config(location_id)
     if not loc:
         return jsonify({'error': f'Unknown location: {location_id}'}), 404
 
     target_file = None if loc.id == 'home' else loc.status_file
+    now_ts = datetime.now(TIMEZONE)
+
+    # Record telemetry reading to voltage_readings table
+    stats_service.record_reading(
+        timestamp=now_ts,
+        location=loc.id,
+        voltage=voltage,
+        before_relay=before_relay,
+        after_relay=after_relay,
+        source=source
+    )
 
     # Check if status actually changed
     current_status = read_power_status(target_file)
@@ -219,7 +376,7 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
     duration_text = None
     if status_changed and current_status.get('timestamp'):
         try:
-            current_timestamp = datetime.now(TIMEZONE)
+            current_timestamp = now_ts
             previous_timestamp = current_status['timestamp']
 
             # Ensure both timestamps are timezone-aware
@@ -247,18 +404,46 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
             logger.error(f"Unexpected error calculating duration: {e}", exc_info=True)
             duration_text = None
 
-    # Only write status to file if status changed (to preserve timestamp)
+    # Write status to file
     if status_changed:
-        if not write_power_status(status, target_file):
+        if not write_power_status(status, target_file, voltage=voltage, before_relay=before_relay, after_relay=after_relay, source=source):
             return jsonify({'error': 'Failed to write status to file'}), 500
         
         # Record event in DB
-        stats_service.record_event(status, datetime.now(TIMEZONE), location=loc.id)
+        stats_service.record_event(
+            status=status,
+            timestamp=now_ts,
+            location=loc.id,
+            voltage=voltage,
+            source=source,
+            before_relay=before_relay,
+            after_relay=after_relay
+        )
+    else:
+        # Status unchanged: preserve timestamp while keeping latest telemetry fresh
+        prev_ts = current_status.get('last_updated')
+        tf = target_file or WATCHDOG_STATUS_FILE
+        try:
+            ts_str = prev_ts if prev_ts and prev_ts != 'Unknown' else f"Last updated: {now_ts.isoformat()}"
+            if not ts_str.startswith('Last updated: '):
+                ts_str = f"Last updated: {ts_str}"
+            lines = [status, ts_str]
+            if voltage is not None:
+                lines.append(f"Voltage: {voltage}")
+            if before_relay is not None:
+                lines.append(f"Before relay: {str(before_relay).lower()}")
+            if after_relay is not None:
+                lines.append(f"After relay: {str(after_relay).lower()}")
+            if source is not None:
+                lines.append(f"Source: {source}")
+            atomic_write_text(tf, "\n".join(lines) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to update metadata in status file: {e}")
 
     # Only send notification if status changed
     notification_sent = False
     if status_changed:
-        timestamp = datetime.now(TIMEZONE)
+        timestamp = now_ts
         loc_display_name = None if loc.id == 'home' else loc.name
 
         if status == 'on':
@@ -272,19 +457,29 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
                     next_outage_start=start_time,
                     next_outage_end=end_time,
                     is_today=is_today,
-                    location_name=loc_display_name
+                    location_name=loc_display_name,
+                    voltage=voltage
                 )
             else:
                 message = PowerStatusFormatter.format_power_on_message(
                     timestamp,
                     duration_text,
-                    location_name=loc_display_name
+                    location_name=loc_display_name,
+                    voltage=voltage
                 )
+        elif status == 'unstable':
+            message = PowerStatusFormatter.format_power_unstable_message(
+                timestamp,
+                duration_text,
+                location_name=loc_display_name,
+                voltage=voltage
+            )
         else:
             message = PowerStatusFormatter.format_power_off_message(
                 timestamp,
                 duration_text,
-                location_name=loc_display_name
+                location_name=loc_display_name,
+                voltage=voltage
             )
 
         loop = get_or_create_eventloop()
@@ -297,7 +492,15 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
         logger.info(f"Status changed to {status} for {loc.id}, notification sent")
 
         # Notify Home Assistant dedicated webhook
-        notify_ha_webhook(loc, status, timestamp)
+        notify_ha_webhook(
+            loc,
+            status,
+            timestamp,
+            voltage=voltage,
+            before_relay=before_relay,
+            after_relay=after_relay,
+            source=source
+        )
     else:
         logger.info(f"Status unchanged ({status}) for {loc.id}, no notification sent")
 
@@ -307,6 +510,14 @@ def _handle_power_status_update(status: str, location_id: Optional[str] = None, 
         'status_changed': status_changed,
         'notification_sent': notification_sent
     }
+    if voltage is not None:
+        response_data['voltage'] = voltage
+    if before_relay is not None:
+        response_data['before_relay'] = before_relay
+    if after_relay is not None:
+        response_data['after_relay'] = after_relay
+    if source is not None:
+        response_data['source'] = source
     if not is_legacy_post:
         response_data['location'] = loc.id
 
@@ -319,27 +530,39 @@ def update_power_status():
     """
     Update power status and send notification to Telegram channel
 
-    Expected JSON body:
+    Expected JSON body (supports both legacy and dual-relay reporting):
     {
-        "status": "on" or "off",
+        "status": "on" | "off" | "unstable",
+        "before_relay": true | false,
+        "after_relay": true | false,
+        "voltage": 228.0,
+        "source": "ha",
         "location": "home" (optional)
     }
 
     Requires Authorization header with API token
-
-    Note: Only sends notification if status actually changed
     """
     try:
         data = request.get_json()
-
-        if not data or 'status' not in data:
+        if data is None:
             return jsonify({'error': 'Missing required field: status'}), 400
 
-        status = data['status'].lower() if isinstance(data['status'], str) else str(data['status']).lower()
+        resolved_status, voltage, source, before_relay, after_relay, err = _parse_power_request(data)
+        if err:
+            return jsonify({'error': err}), 400
+
         loc_id = data.get('location')
         is_legacy = (loc_id is None or loc_id.lower() == 'home')
 
-        return _handle_power_status_update(status, loc_id, is_legacy_post=is_legacy)
+        return _handle_power_status_update(
+            resolved_status,
+            loc_id,
+            is_legacy_post=is_legacy,
+            voltage=voltage,
+            source=source,
+            before_relay=before_relay,
+            after_relay=after_relay
+        )
 
     except Exception as e:
         logger.error(f"Error updating power status: {e}")
@@ -354,18 +577,31 @@ def update_location_power_status(location_id: str):
 
     Expected JSON body:
     {
-        "status": "on" or "off"
+        "status": "on" | "off" | "unstable",
+        "before_relay": true | false,
+        "after_relay": true | false,
+        "voltage": 228.0,
+        "source": "ha"
     }
     """
     try:
         data = request.get_json()
-
-        if not data or 'status' not in data:
+        if data is None:
             return jsonify({'error': 'Missing required field: status'}), 400
 
-        status = data['status'].lower() if isinstance(data['status'], str) else str(data['status']).lower()
+        resolved_status, voltage, source, before_relay, after_relay, err = _parse_power_request(data)
+        if err:
+            return jsonify({'error': err}), 400
 
-        return _handle_power_status_update(status, location_id, is_legacy_post=False)
+        return _handle_power_status_update(
+            resolved_status,
+            location_id,
+            is_legacy_post=False,
+            voltage=voltage,
+            source=source,
+            before_relay=before_relay,
+            after_relay=after_relay
+        )
 
     except Exception as e:
         logger.error(f"Error updating power status for location {location_id}: {e}")
@@ -382,7 +618,10 @@ def get_power_status():
     """
     try:
         status = read_power_status()
-        return jsonify(status), 200
+        resp = dict(status)
+        if resp.get('timestamp') and hasattr(resp['timestamp'], 'isoformat'):
+            resp['timestamp'] = resp['timestamp'].isoformat()
+        return jsonify(resp), 200
     except Exception as e:
         logger.error(f"Error getting power status: {e}")
         return jsonify({'error': str(e)}), 500
@@ -403,13 +642,22 @@ def get_location_power_status(location_id: str):
 
         target_file = None if loc.id == 'home' else loc.status_file
         status = read_power_status(target_file)
-        return jsonify({
+        resp = {
             'location': loc.id,
             'name': loc.name,
             'status': status.get('status'),
             'last_updated': status.get('last_updated'),
             'timestamp': status.get('timestamp').isoformat() if status.get('timestamp') else None
-        }), 200
+        }
+        if status.get('voltage') is not None:
+            resp['voltage'] = status.get('voltage')
+        if status.get('before_relay') is not None:
+            resp['before_relay'] = status.get('before_relay')
+        if status.get('after_relay') is not None:
+            resp['after_relay'] = status.get('after_relay')
+        if status.get('source') is not None:
+            resp['source'] = status.get('source')
+        return jsonify(resp), 200
     except Exception as e:
         logger.error(f"Error getting power status for location {location_id}: {e}")
         return jsonify({'error': str(e)}), 500
