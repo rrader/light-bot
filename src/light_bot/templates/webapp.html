@@ -282,6 +282,13 @@
         .dot-amber { background: #f59e0b; }
         .dot-gray { background: #64748b; }
 
+        .timeline-section {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
         /* Split 2-track timeline container */
         .timeline-bar-wrapper {
             position: relative;
@@ -384,29 +391,28 @@
         /* Tooltip popup for hovering timeline segments */
         .timeline-tooltip {
             position: absolute;
-            bottom: calc(100% + 8px);
+            top: -54px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(18, 18, 20, 0.95);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: #18181b;
+            border: 1px solid rgba(255, 255, 255, 0.25);
             border-radius: 8px;
-            padding: 6px 10px;
+            padding: 8px 12px;
             color: #ffffff;
             font-size: 11px;
-            line-height: 1.35;
+            line-height: 1.4;
             white-space: nowrap;
             pointer-events: none;
-            z-index: 100;
+            z-index: 9999;
             opacity: 0;
-            transition: opacity 0.15s ease, transform 0.15s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            display: none;
+            transition: opacity 0.12s ease;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
         }
 
         .timeline-tooltip.visible {
-            opacity: 1;
-            transform: translateX(-50%) translateY(-2px);
+            opacity: 1 !important;
+            display: block !important;
         }
 
         .timeline-tooltip::after {
@@ -415,13 +421,14 @@
             top: 100%;
             left: 50%;
             transform: translateX(-50%);
-            border-width: 5px;
+            border-width: 6px;
             border-style: solid;
-            border-color: rgba(18, 18, 20, 0.95) transparent transparent transparent;
+            border-color: #18181b transparent transparent transparent;
         }
 
         .sched-seg, .fact-seg {
             cursor: pointer;
+            z-index: 8;
         }
 
         /* 24-hour grid overlay */
@@ -433,7 +440,7 @@
             bottom: 0;
             display: flex;
             pointer-events: none;
-            z-index: 7;
+            z-index: 2;
         }
 
         .timeline-grid-cell {
@@ -562,6 +569,9 @@
 
             <!-- 2-Track visual timeline bar -->
             <div class="timeline-section">
+                <!-- Floating tooltip for segment inspect -->
+                <div class="timeline-tooltip" id="timelineTooltip"></div>
+
                 <!-- Legend -->
                 <div class="timeline-legend">
                     <div class="legend-left">
@@ -589,9 +599,6 @@
                         <span class="track-tag">Факт</span>
                     </div>
 
-                    <!-- Floating tooltip for segment inspect -->
-                    <div class="timeline-tooltip" id="timelineTooltip"></div>
-
                     <!-- 24 hourly vertical grid dividers -->
                     <div class="timeline-grid" id="timelineGrid"></div>
 
@@ -618,6 +625,13 @@
     </div>
 
     <script>
+        // Close tooltip when clicking outside on mobile
+        document.addEventListener('touchstart', (e) => {
+            if (!e.target.closest('.sched-seg') && !e.target.closest('.fact-seg')) {
+                hideTimelineTooltip();
+            }
+        });
+
         // Initialize Telegram WebApp
         const tg = window.Telegram?.WebApp;
         if (tg) {
@@ -903,11 +917,12 @@
             tooltip.innerHTML = text;
             tooltip.classList.add('visible');
 
-            const wrapper = document.querySelector('.timeline-bar-wrapper');
-            if (wrapper) {
-                const rect = wrapper.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const clampedX = Math.max(50, Math.min(x, rect.width - 50));
+            const section = document.querySelector('.timeline-section');
+            if (section) {
+                const rect = section.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = clientX - rect.left;
+                const clampedX = Math.max(60, Math.min(x, rect.width - 60));
                 tooltip.style.left = `${clampedX}px`;
             }
         }
@@ -956,6 +971,7 @@
                 seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
                 seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
                 seg.addEventListener('mouseleave', hideTimelineTooltip);
+                seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, `<b>План:</b> ${labelText}`); e.stopPropagation(); });
 
                 schedContainer.appendChild(seg);
 
@@ -991,6 +1007,7 @@
                     seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
                     seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
                     seg.addEventListener('mouseleave', hideTimelineTooltip);
+                    seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, tipText); e.stopPropagation(); });
 
                     schedContainer.appendChild(seg);
 
@@ -1042,6 +1059,7 @@
                     seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
                     seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
                     seg.addEventListener('mouseleave', hideTimelineTooltip);
+                    seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, tipText); e.stopPropagation(); });
                 }
 
                 factContainer.appendChild(seg);
