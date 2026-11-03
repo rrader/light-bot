@@ -43,28 +43,34 @@ class GroupScheduleSender:
         self,
         bot: Bot,
         channel_id: str | int,
-        group_config: GroupConfig,
-        formatter: ScheduleFormatter,
+        group_config: Optional[GroupConfig] = None,
+        formatter: Optional[ScheduleFormatter] = None,
         # State file paths
-        today_hash_file: str,
-        tomorrow_hash_file: str,
-        today_data_file: str,
-        tomorrow_data_file: str,
-        last_check_date_file: str,
-        tomorrow_sent_date_file: str,
-        last_warning_sent_file: str,
+        today_hash_file: str = None,
+        tomorrow_hash_file: str = None,
+        today_data_file: str = None,
+        tomorrow_data_file: str = None,
+        last_check_date_file: str = None,
+        tomorrow_sent_date_file: str = None,
+        last_warning_sent_file: str = None,
         # Time windows
-        today_start_hour: int,
-        today_end_hour: int,
-        tomorrow_start_hour: int,
-        tomorrow_end_hour: int,
+        today_start_hour: int = 7,
+        today_end_hour: int = 23,
+        tomorrow_start_hour: int = 18,
+        tomorrow_end_hour: int = 23,
         # Warning configuration
-        warning_minutes: int,
-        warning_check_interval: int,
+        warning_minutes: int = 30,
+        warning_check_interval: int = 300,
         # Optional AI explainer
         ai_explainer=None,
         stats_service: Optional[StatsService] = None,
+        group: Optional[str] = None,
+        city: Optional[str] = None,
+        **kwargs
     ):
+        if group_config is None and group is not None:
+            clean_id = f"group_{group.replace('.', '_')}" if '.' in group else group
+            group_config = GroupConfig(id=clean_id, group=group, city=city or 'kiev')
         """Initialize GroupScheduleSender
 
         Args:

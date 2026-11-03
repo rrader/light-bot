@@ -4,13 +4,13 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from light_bot.models.power_event import PowerEvent
 from light_bot.models.schedule_history import ScheduleHistory
-from light_bot.config import TIMEZONE
+from light_bot.config import TIMEZONE, DB_PATH
 
 logger = logging.getLogger(__name__)
 
 class StatsService:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or DB_PATH
         self._init_db()
 
     def _get_conn(self):

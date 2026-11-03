@@ -14,7 +14,9 @@ class PowerStatusFormatter:
         is_today: bool = True,
         location_name: Optional[str] = None,
         voltage: Optional[float] = None,
-        was_unstable: bool = False
+        was_unstable: bool = False,
+        min_voltage: Optional[float] = None,
+        max_voltage: Optional[float] = None
     ) -> str:
         """
         Format message for when power comes back on (or stabilizes)
@@ -28,6 +30,8 @@ class PowerStatusFormatter:
             location_name: Optional location display name (e.g. "Вінниця")
             voltage: Optional line voltage reading (e.g. 228.0)
             was_unstable: Whether the previous state was 'unstable'
+            min_voltage: Optional minimum voltage during instability period
+            max_voltage: Optional maximum voltage during instability period
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
         if was_unstable:
@@ -41,7 +45,12 @@ class PowerStatusFormatter:
         )
 
         if voltage is not None:
-            message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
+            if was_unstable and min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 2.0:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b> (діапазон коливань: {min_voltage:.1f}–{max_voltage:.1f} В)\n"
+            else:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
+        elif was_unstable and min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 2.0:
+            message += f"⚡️ Діапазон коливань напруги: <b>{min_voltage:.1f}–{max_voltage:.1f} В</b>\n"
 
         if duration_text:
             label = "Нестабільність тривала" if was_unstable else "Відключення тривало"

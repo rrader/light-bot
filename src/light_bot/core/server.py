@@ -462,7 +462,7 @@ def _handle_power_status_update(
         message = None
 
         if status == 'on':
-            unstable_alert_was_sent = unstable_alert_manager.cancel(loc.id)
+            unstable_alert_was_sent, min_v, max_v = unstable_alert_manager.cancel(loc.id)
             if was_unstable and not unstable_alert_was_sent:
                 # Voltage spike was short-lived (< delay_seconds) and alert was never sent:
                 # suppress Telegram message completely so user is not spammed.
@@ -484,7 +484,9 @@ def _handle_power_status_update(
                         is_today=is_today,
                         location_name=loc_display_name,
                         voltage=voltage,
-                        was_unstable=was_unstable
+                        was_unstable=was_unstable,
+                        min_voltage=min_v,
+                        max_voltage=max_v
                     )
                 else:
                     message = PowerStatusFormatter.format_power_on_message(
@@ -492,7 +494,9 @@ def _handle_power_status_update(
                         duration_text,
                         location_name=loc_display_name,
                         voltage=voltage,
-                        was_unstable=was_unstable
+                        was_unstable=was_unstable,
+                        min_voltage=min_v,
+                        max_voltage=max_v
                     )
         elif status == 'unstable':
             # Schedule delayed alert to filter out short-lived spikes;

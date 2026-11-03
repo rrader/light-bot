@@ -24,4 +24,9 @@ def create_stats_blueprint(stats_service: StatsService):
         history_data = stats_service.get_daily_history(days)
         return jsonify(history_data)
 
+    @bp.route('/app')
+    @bp.route('/app/<location_id>')
+    def webapp(location_id=None):
+        return render_template('webapp.html', initial_location=location_id or 'home')
+
     return bp

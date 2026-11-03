@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Графік та мережа</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: #f2f2f7;
+            --card-bg: #ffffff;
+            --text-color: #1c1c1e;
+            --text-secondary: #8e8e93;
+            --border-color: #e5e5ea;
+            --stat-bg: #f7f7f9;
+            --green: #1e6b2c;
+            --green-gradient-1: #1e4d2b;
+            --green-gradient-2: #13331b;
+            --red: #a81c1c;
+            --red-gradient-1: #6b0c0c;
+            --red-gradient-2: #4a0606;
+            --amber: #d96b00;
+            --amber-gradient-1: #8a5005;
+            --amber-gradient-2: #573102;
+        }
+
+        body.dark {
+            --bg-color: #121214;
+            --card-bg: #1c1c1e;
+            --text-color: #f5f5f7;
+            --text-secondary: #98989d;
+            --border-color: #2c2c2e;
+            --stat-bg: #242426;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        /* Top header bar */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2px 4px;
+        }
+
+        .top-bar-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .top-bar-title svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        /* Location Tabs */
+        .location-tabs {
+            display: flex;
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 4px;
+            border: 1px solid var(--border-color);
+            gap: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .tab-btn.active {
+            background: var(--stat-bg);
+            color: var(--text-color);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        body.dark .tab-btn.active {
+            background: #2c2c2e;
+            color: #ffffff;
+        }
+
+        /* Main Card */
+        .main-card {
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 22px 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .header-title-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-icon {
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .header-title {
+            font-size: 21px;
+            font-weight: 700;
+            color: var(--text-color);
+            line-height: 1.2;
+        }
+
+        .status-badge {
+            padding: 7px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: white;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            transition: background 0.3s ease;
+        }
+
+        .status-on {
+            background-color: var(--green);
+        }
+
+        .status-off {
+            background-color: var(--red);
+        }
+
+        .status-unstable {
+            background-color: var(--amber);
+        }
+
+        /* Subtitles & Telemetry */
+        .status-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .meta-line {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .meta-line-duration {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .telemetry-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+            padding: 10px 14px;
+            background: var(--stat-bg);
+            border-radius: 14px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .telemetry-row .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .telemetry-row .separator {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+
+        /* Timeline schedule bar */
+        .timeline-section {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .timeline-bar-wrapper {
+            position: relative;
+            width: 100%;
+            height: 44px;
+            border-radius: 14px;
+            background: #142e18;
+            border: 2px solid #0f2312;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        body.dark .timeline-bar-wrapper {
+            border-color: #1a381e;
+        }
+
+        .timeline-bar-segments {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        .bar-segment {
+            height: 100%;
+            position: relative;
+        }
+
+        .bar-segment.on {
+            background: linear-gradient(180deg, var(--green-gradient-1) 0%, var(--green-gradient-2) 100%);
+        }
+
+        .bar-segment.off {
+            background: linear-gradient(180deg, var(--red-gradient-1) 0%, var(--red-gradient-2) 100%);
+        }
+
+        .bar-segment.unstable {
+            background: linear-gradient(180deg, var(--amber-gradient-1) 0%, var(--amber-gradient-2) 100%);
+        }
+
+        .timeline-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            pointer-events: none;
+        }
+
+        .timeline-grid-cell {
+            flex: 1;
+            height: 100%;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .timeline-grid-cell:last-child {
+            border-right: none;
+        }
+
+        /* Current time cursor line */
+        .timeline-cursor {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #ffffff;
+            box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.9);
+            z-index: 10;
+            transform: translateX(-50%);
+            border-radius: 2px;
+            pointer-events: none;
+        }
+
+        /* Timeline Labels */
+        .timeline-labels {
+            position: relative;
+            width: 100%;
+            height: 18px;
+            margin-top: 4px;
+        }
+
+        .timeline-tick-label {
+            position: absolute;
+            top: 0;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        /* Bottom stat boxes */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 2px;
+        }
+
+        .stat-box {
+            background: var(--stat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 14px 12px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 6px;
+            min-height: 72px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            line-height: 1.2;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+
+        /* Live status dot in header */
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        .live-box {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body data-initial-location="{{ initial_location or 'home' }}">
+    <div class="container">
+        <!-- Top bar -->
+        <div class="top-bar">
+            <div class="top-bar-title">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                </svg>
+                <span id="pageSubtitle">Графік та мережа</span>
+            </div>
+            <div class="live-box">
+                <div class="pulse-dot" id="liveDot"></div>
+                <span id="liveStatusText">Live</span>
+            </div>
+        </div>
+
+        <!-- Location selector tabs -->
+        <div class="location-tabs">
+            <button class="tab-btn active" id="tabHome" onclick="selectLocation('home')">🏠 Дім (Київ / 53.1)</button>
+            <button class="tab-btn" id="tabVinnytsia" onclick="selectLocation('vinnytsia')">🏙 Вінниця (2.1)</button>
+        </div>
+
+        <!-- Main Card -->
+        <div class="main-card">
+            <!-- Header -->
+            <div class="card-header">
+                <div class="header-title-box">
+                    <div class="header-icon" id="headerIcon">☀️</div>
+                    <div class="header-title" id="headerTitle">Світло • Дім / 53.1</div>
+                </div>
+                <div class="status-badge status-on" id="statusBadge">Є СВІТЛО</div>
+            </div>
+
+            <!-- Status Subtitles -->
+            <div class="status-meta">
+                <div class="meta-line" id="statusEventLine">Світло ввімкнули о --:--</div>
+                <div class="meta-line-duration" id="statusDurationLine">Тривалість: -- год -- хв</div>
+            </div>
+
+            <!-- Live Voltage & Telemetry -->
+            <div class="telemetry-row">
+                <span class="pill" id="voltagePill">⚡️ Напруга: <b id="voltageVal">-- В</b></span>
+                <span class="separator">•</span>
+                <span class="pill" id="relayPill">Реле: <b id="relayVal">--</b></span>
+                <span class="separator">•</span>
+                <span class="pill" id="updatedPill">Оновлено: <b id="updatedVal">щойно</b></span>
+            </div>
+
+            <!-- 24-hour visual timeline bar -->
+            <div class="timeline-section">
+                <div class="timeline-bar-wrapper">
+                    <!-- Segments from schedule -->
+                    <div class="timeline-bar-segments" id="timelineSegments"></div>
+                    <!-- 24 hourly vertical grid dividers -->
+                    <div class="timeline-grid" id="timelineGrid"></div>
+                    <!-- White current time cursor -->
+                    <div class="timeline-cursor" id="timelineCursor" style="left: 50%;"></div>
+                </div>
+                <!-- Time ticks below bar -->
+                <div class="timeline-labels" id="timelineLabels"></div>
+            </div>
+
+            <!-- Bottom stat cards -->
+            <div class="stat-grid">
+                <div class="stat-box">
+                    <div class="stat-label">Всього за добу без світла</div>
+                    <div class="stat-value" id="outageStatVal">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label" id="rightStatLabel">Наступне відключення</div>
+                    <div class="stat-value" id="rightStatVal">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
+            if (tg.colorScheme === 'dark') {
+                document.body.classList.add('dark');
+            }
+            tg.onEvent('themeChanged', () => {
+                if (tg.colorScheme === 'dark') {
+                    document.body.classList.add('dark');
+                } else {
+                    document.body.classList.remove('dark');
+                }
+            });
+        }
+
+        // Build 24 grid lines
+        const gridEl = document.getElementById('timelineGrid');
+        for (let i = 0; i < 24; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'timeline-grid-cell';
+            gridEl.appendChild(cell);
+        }
+
+        // Active location
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentLocation = urlParams.get('loc') || document.body.dataset.initialLocation || 'home';
+
+        function selectLocation(loc) {
+            currentLocation = loc;
+            document.getElementById('tabHome').classList.toggle('active', loc === 'home');
+            document.getElementById('tabVinnytsia').classList.toggle('active', loc === 'vinnytsia');
+            if (tg?.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+            fetchData();
+        }
+
+        // Helper to format minutes into HH:MM
+        function minsToTimeStr(mins) {
+            const h = String(Math.floor(mins / 60) % 24).padStart(2, '0');
+            const m = String(mins % 60).padStart(2, '0');
+            return `${h}:${m}`;
+        }
+
+        // Helper to format duration string
+        function formatDuration(diffMs) {
+            if (diffMs < 0) diffMs = 0;
+            const totalMins = Math.floor(diffMs / 60000);
+            const hrs = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            return `${String(hrs).padStart(2, '0')} год ${String(mins).padStart(2, '0')} хв`;
+        }
+
+        // Update cursor position continuously
+        function updateCursor() {
+            const now = new Date();
+            const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+            const parts = kyivTimeStr.split(':');
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            const totalMinutes = (hours * 60) + minutes;
+            const pct = (totalMinutes / 1440) * 100;
+            const cursorEl = document.getElementById('timelineCursor');
+            if (cursorEl) {
+                cursorEl.style.left = `${pct.toFixed(2)}%`;
+            }
+        }
+        setInterval(updateCursor, 10000);
+        updateCursor();
+
+        // State holder for duration recalculation
+        let currentStatusStart = null;
+        let currentStatusType = 'on';
+
+        function tickDuration() {
+            if (!currentStatusStart) return;
+            const now = new Date();
+            const diffMs = now - currentStatusStart;
+            document.getElementById('statusDurationLine').textContent = `Тривалість: ${formatDuration(diffMs)}`;
+        }
+        setInterval(tickDuration, 10000);
+
+        // Fetch power status, schedule and events
+        async function fetchData() {
+            try {
+                // 1. Fetch power status
+                const statusRes = await fetch(`/api/power-status/${currentLocation}`);
+                const statusData = await statusRes.json();
+
+                // 2. Fetch schedule
+                let scheduleData = null;
+                try {
+                    const scheduleRes = await fetch(`/api/schedule/${currentLocation}`);
+                    if (scheduleRes.ok) {
+                        scheduleData = await scheduleRes.json();
+                    }
+                } catch (e) {
+                    console.warn("Schedule not available:", e);
+                }
+
+                // 3. Fetch recent events to find when current status began
+                let eventsData = [];
+                try {
+                    const evRes = await fetch(`/api/events?limit=10&location=${currentLocation}`);
+                    if (evRes.ok) {
+                        eventsData = await evRes.json();
+                    }
+                } catch (e) {
+                    console.warn("Events not available:", e);
+                }
+
+                renderView(statusData, scheduleData, eventsData);
+            } catch (e) {
+                console.error("Failed to load status:", e);
+            }
+        }
+
+        function renderView(statusInfo, scheduleInfo, eventsList) {
+            const isHome = (currentLocation === 'home');
+            document.getElementById('headerTitle').textContent = isHome ? 'Світло • Дім / 53.1' : 'Світло • Вінниця / 2.1';
+            document.getElementById('pageSubtitle').textContent = isHome ? 'Графік та мережа • Київ' : 'Графік та мережа • Вінниця';
+
+            const status = (statusInfo.status || 'unknown').toLowerCase();
+            currentStatusType = status;
+
+            const badge = document.getElementById('statusBadge');
+            const icon = document.getElementById('headerIcon');
+            const liveDot = document.getElementById('liveDot');
+
+            badge.className = 'status-badge';
+            if (status === 'on') {
+                badge.classList.add('status-on');
+                badge.textContent = 'Є СВІТЛО';
+                icon.textContent = '☀️';
+                liveDot.style.background = 'var(--green)';
+            } else if (status === 'unstable') {
+                badge.classList.add('status-unstable');
+                badge.textContent = 'НЕСТАБІЛЬНА НАПРУГА';
+                icon.textContent = '🟡';
+                liveDot.style.background = 'var(--amber)';
+            } else {
+                badge.classList.add('status-off');
+                badge.textContent = 'НЕМАЄ СВІТЛА';
+                icon.textContent = '🌑';
+                liveDot.style.background = 'var(--red)';
+            }
+
+            // Determine status start time from events or status timestamp
+            let startTime = null;
+            if (eventsList && eventsList.length > 0) {
+                // Find latest event matching current status
+                const matchEv = eventsList.find(e => (e.status || (e.on ? 'on' : 'off')) === status);
+                if (matchEv && (matchEv.timestamp || matchEv.t)) {
+                    startTime = new Date(matchEv.timestamp || matchEv.t);
+                }
+            }
+            if (!startTime && statusInfo.timestamp) {
+                startTime = new Date(statusInfo.timestamp);
+            }
+
+            if (startTime && !isNaN(startTime.getTime())) {
+                currentStatusStart = startTime;
+                const timeStr = startTime.toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit' });
+                if (status === 'on') {
+                    document.getElementById('statusEventLine').textContent = `Світло ввімкнули о ${timeStr}`;
+                } else if (status === 'unstable') {
+                    document.getElementById('statusEventLine').textContent = `Нестабільна напруга з ${timeStr}`;
+                } else {
+                    document.getElementById('statusEventLine').textContent = `Світло вимкнули о ${timeStr}`;
+                }
+                const diffMs = new Date() - startTime;
+                document.getElementById('statusDurationLine').textContent = `Тривалість: ${formatDuration(diffMs)}`;
+            } else {
+                document.getElementById('statusEventLine').textContent = (status === 'on' ? 'Світло є' : status === 'unstable' ? 'Нестабільна напруга' : 'Знеструмлено');
+                document.getElementById('statusDurationLine').textContent = 'Статус активний';
+            }
+
+            // Voltage & Telemetry
+            const voltage = statusInfo.voltage;
+            if (voltage !== undefined && voltage !== null && voltage > 0) {
+                document.getElementById('voltageVal').textContent = `${voltage.toFixed(1)} В`;
+            } else {
+                document.getElementById('voltageVal').textContent = '-- В';
+            }
+
+            // Relay state
+            if (statusInfo.before_relay !== undefined && statusInfo.after_relay !== undefined) {
+                const relayEl = document.getElementById('relayVal');
+                if (statusInfo.after_relay) {
+                    relayEl.textContent = 'увімкнено';
+                    relayEl.style.color = 'var(--green)';
+                } else if (statusInfo.before_relay) {
+                    relayEl.textContent = 'відімкнуто (захист)';
+                    relayEl.style.color = 'var(--amber)';
+                } else {
+                    relayEl.textContent = 'знеструмлено';
+                    relayEl.style.color = 'var(--red)';
+                }
+            } else {
+                const relayEl = document.getElementById('relayVal');
+                relayEl.textContent = (status === 'on' ? 'норма' : 'відключено');
+                relayEl.style.color = (status === 'on' ? 'var(--green)' : 'var(--red)');
+            }
+
+            // Relative updated time
+            if (statusInfo.timestamp) {
+                const updateTime = new Date(statusInfo.timestamp);
+                const ageSec = Math.floor((new Date() - updateTime) / 1000);
+                if (ageSec < 60) {
+                    document.getElementById('updatedVal').textContent = 'щойно';
+                } else if (ageSec < 3600) {
+                    document.getElementById('updatedVal').textContent = `${Math.floor(ageSec / 60)} хв тому`;
+                } else {
+                    document.getElementById('updatedVal').textContent = updateTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+                }
+            } else {
+                document.getElementById('updatedVal').textContent = 'щойно';
+            }
+
+            // Schedule Timeline Bar
+            renderTimelineBar(scheduleInfo, status);
+        }
+
+        function renderTimelineBar(scheduleInfo, currentStatus) {
+            const container = document.getElementById('timelineSegments');
+            const labelsContainer = document.getElementById('timelineLabels');
+            container.innerHTML = '';
+            labelsContainer.innerHTML = '';
+
+            const today = scheduleInfo?.schedule?.today;
+            const slots = today?.slots || [];
+            const schedStatus = today?.status;
+
+            let totalOutageMins = 0;
+            let nextOutageText = '--';
+
+            const now = new Date();
+            const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+            const parts = kyivTimeStr.split(':');
+            const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+
+            if (schedStatus === 'EmergencyShutdowns' || slots.length === 0) {
+                // Emergency or no planned schedule
+                const seg = document.createElement('div');
+                seg.className = `bar-segment ${currentStatus === 'off' ? 'off' : currentStatus === 'unstable' ? 'unstable' : 'on'}`;
+                seg.style.width = '100%';
+                container.appendChild(seg);
+
+                // Default boundary labels 00:00 and 24:00
+                addLabel(labelsContainer, 0, '00:00');
+                addLabel(labelsContainer, 1440, '24:00');
+
+                document.getElementById('outageStatVal').textContent = (schedStatus === 'EmergencyShutdowns' ? 'Екстрені відключення' : 'Без відключень');
+                document.getElementById('rightStatLabel').textContent = 'Стан мережі';
+                document.getElementById('rightStatVal').textContent = (currentStatus === 'on' ? 'Штатно' : currentStatus === 'unstable' ? 'Нестабільно' : 'Аварійно');
+                return;
+            }
+
+            // Collect slot boundary minutes for labels
+            const boundaryMinutes = [0];
+
+            slots.forEach(slot => {
+                const duration = slot.end - slot.start;
+                const widthPct = (duration / 1440) * 100;
+                const seg = document.createElement('div');
+                seg.className = 'bar-segment';
+                seg.style.width = `${widthPct}%`;
+
+                const isOutage = (slot.type === 'Definite' || slot.type === 'Maybe');
+                if (isOutage) {
+                    seg.classList.add(slot.type === 'Maybe' ? 'unstable' : 'off');
+                    totalOutageMins += duration;
+                    if (slot.start > currentMins && nextOutageText === '--') {
+                        nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
+                    }
+                } else {
+                    seg.classList.add('on');
+                }
+                container.appendChild(seg);
+
+                if (!boundaryMinutes.includes(slot.start)) {
+                    boundaryMinutes.push(slot.start);
+                }
+                if (!boundaryMinutes.includes(slot.end) && slot.end < 1440) {
+                    boundaryMinutes.push(slot.end);
+                }
+            });
+
+            // Render labels placed at slot boundaries
+            boundaryMinutes.sort((a, b) => a - b).forEach(mins => {
+                addLabel(labelsContainer, mins, minsToTimeStr(mins));
+            });
+
+            // Update bottom stats
+            const outHours = Math.floor(totalOutageMins / 60);
+            const outPct = Math.round((totalOutageMins / 1440) * 100);
+            document.getElementById('outageStatVal').textContent = `${outHours} год (${outPct}%)`;
+
+            document.getElementById('rightStatLabel').textContent = 'Наступне відключення';
+            document.getElementById('rightStatVal').textContent = nextOutageText;
+        }
+
+        function addLabel(parent, mins, text) {
+            const span = document.createElement('span');
+            span.className = 'timeline-tick-label';
+            span.textContent = text;
+            const pct = (mins / 1440) * 100;
+
+            if (mins === 0) {
+                span.style.left = '0';
+            } else if (mins >= 1420) {
+                span.style.right = '0';
+            } else {
+                span.style.left = `${pct.toFixed(2)}%`;
+                span.style.transform = 'translateX(-50%)';
+            }
+            parent.appendChild(span);
+        }
+
+        // Initial fetch and 10s auto-refresh
+        selectLocation(currentLocation);
+        setInterval(fetchData, 10000);
+    </script>
+</body>
+</html>

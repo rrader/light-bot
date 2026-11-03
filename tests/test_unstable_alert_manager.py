@@ -74,10 +74,12 @@ class TestUnstableAlertManagerLifecycle:
 
         # Status normalizes within 0.1s (< 2s)
         time.sleep(0.1)
-        alert_was_sent = manager.cancel(location.id)
+        alert_was_sent, min_v, max_v = manager.cancel(location.id)
 
         # Alert must NOT have been sent!
         assert alert_was_sent is False
+        assert min_v == 265.0
+        assert max_v == 265.0
         assert manager.is_pending(location.id) is False
         mock_bot.send_message.assert_not_called()
 
@@ -105,6 +107,8 @@ class TestUnstableAlertManagerLifecycle:
         assert "282.0" in sent_text
         assert "нестабільна напруга" in sent_text
 
-        # Now when power recovers: cancel() returns True so recovery alert is sent
-        recovery_was_sent = manager.cancel(location.id)
+        # Now when power recovers: cancel() returns True with recorded range
+        recovery_was_sent, min_v, max_v = manager.cancel(location.id)
         assert recovery_was_sent is True
+        assert min_v == 220.0
+        assert max_v == 282.0

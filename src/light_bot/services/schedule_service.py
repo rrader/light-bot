@@ -41,11 +41,11 @@ class ScheduleService:
     Supports monitoring single or multiple groups via YASNO_GROUPS configuration.
     """
 
-    def __init__(self, stats_service: StatsService):
+    def __init__(self, stats_service: Optional[StatsService] = None):
         self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
         self.formatter = ScheduleFormatter()
         self.monitoring = False
-        self.stats_service = stats_service
+        self.stats_service = stats_service or StatsService()
 
         # Schedule data cache with thread safety
         self._cache_lock = asyncio.Lock()

@@ -156,27 +156,39 @@ class UnstableAlertManager:
             return min_v
         return fallback
 
-    def cancel(self, location_id: str) -> bool:
+    def cancel(self, location_id: str) -> Tuple[bool, Optional[float], Optional[float]]:
         """
         Cancel any pending unstable alert for the given location.
         Returns:
-            bool: True if an unstable alert WAS ALREADY SENT to Telegram.
-                  False if the alert was still pending and got SUPPRESSED.
+            Tuple[bool, Optional[float], Optional[float]]:
+                (alert_was_sent, min_voltage, max_voltage)
         """
         with self._lock:
             state = self._states.pop(location_id, None)
             if not state:
-                return False
+                return False, None, None
             timer = state.get('timer')
             if timer:
                 timer.cancel()
             was_sent = state.get('alert_sent', False)
-            if not was_sent:
-                logger.info(
-                    f"Suppressed short-lived unstable alert for {location_id} "
-                    f"(duration was < {self.delay_seconds}s)"
-                )
-            return was_sent
+            start_time = state.get('start_time')
+            min_v = state.get('min_voltage')
+            max_v = state.get('max_voltage')
+
+        # Check DB for full window of readings
+        if self.stats_service and start_time:
+            db_min, db_max = self.stats_service.get_voltage_extrema(location_id, since=start_time)
+            if db_min is not None:
+                min_v = min(min_v, db_min) if min_v is not None else db_min
+            if db_max is not None:
+                max_v = max(max_v, db_max) if max_v is not None else db_max
+
+        if not was_sent:
+            logger.info(
+                f"Suppressed short-lived unstable alert for {location_id} "
+                f"(duration was < {self.delay_seconds}s)"
+            )
+        return was_sent, min_v, max_v
 
     def is_alert_sent(self, location_id: str) -> bool:
         """Check if an unstable alert was already sent for the given location"""

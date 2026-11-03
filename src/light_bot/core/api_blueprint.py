@@ -473,8 +473,7 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
     @api_bp.after_request
     def set_cors_headers(response):
         origin = request.headers.get('Origin')
-        # Allow po2.kyiv.ua, localhost for development, or wildcard for read-only GET requests
-        if origin and (origin == 'https://po2.kyiv.ua' or origin == 'http://po2.kyiv.ua' or 'po2.kyiv.ua' in origin or 'localhost' in origin):
+        if origin:
             response.headers['Access-Control-Allow-Origin'] = origin
         else:
             response.headers['Access-Control-Allow-Origin'] = 'https://po2.kyiv.ua'
