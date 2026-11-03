@@ -1,9 +1,20 @@
 import logging
-from telegram import Bot
+from typing import Optional
+from telegram import Bot, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.error import TelegramError
 from light_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, TELEGRAM_API_BASE_URL
 
 logger = logging.getLogger(__name__)
+
+
+def get_webapp_inline_keyboard(location_id: Optional[str] = 'home') -> InlineKeyboardMarkup:
+    """Get inline keyboard with Web App direct link for channel posts"""
+    app_url = "https://t.me/power_po2_bot/app"
+    if location_id and location_id != 'home':
+        app_url = f"{app_url}?startapp={location_id}"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(text="⚡️ Графік та статус", url=app_url)]
+    ])
 
 
 class TelegramChannelBot:
@@ -20,15 +31,23 @@ class TelegramChannelBot:
 
         self.channel_id = TELEGRAM_CHANNEL_ID
 
-    async def send_message(self, text: str, chat_id: str = None) -> bool:
-        """Send text message to the configured channel or specified chat_id"""
+    async def send_message(
+        self,
+        text: str,
+        chat_id: Optional[str] = None,
+        reply_markup: Optional[InlineKeyboardMarkup] = None
+    ) -> bool:
+        """Send text message to the configured channel or specified chat_id with optional inline keyboard"""
         target = chat_id or self.channel_id
         try:
-            message = await self.bot.send_message(
-                chat_id=target,
-                text=text,
-                parse_mode='HTML'
-            )
+            kwargs = {
+                'chat_id': target,
+                'text': text,
+                'parse_mode': 'HTML'
+            }
+            if reply_markup is not None:
+                kwargs['reply_markup'] = reply_markup
+            message = await self.bot.send_message(**kwargs)
             logger.info(f"Message sent successfully to {target}: {message.message_id}")
             return True
         except TelegramError as e:

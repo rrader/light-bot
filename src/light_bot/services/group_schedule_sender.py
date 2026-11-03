@@ -11,6 +11,7 @@ from telegram.error import TelegramError
 from light_bot.api.yasno import YasnoScheduleResponse
 from light_bot.api.yasno.models import GroupSchedule
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
+from light_bot.core.bot import get_webapp_inline_keyboard
 from light_bot.core.file_utils import atomic_write_text, read_text, safe_remove, safe_rename
 from light_bot.config import TIMEZONE
 from light_bot.core.schedule_tools import find_next_outage, get_outage_slots, is_currently_in_outage
@@ -478,10 +479,12 @@ class GroupScheduleSender:
 
             logger.info(f"[{self.group_config.group}] Formatted message:\n{message}")
 
+            keyboard = get_webapp_inline_keyboard(self.group_config.id)
             await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=message,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=keyboard
             )
             logger.info(f"[{self.group_config.group}] Schedule message sent successfully")
             return True
@@ -686,10 +689,12 @@ class GroupScheduleSender:
                 channel=self.group_config.channel,
             )
 
+            keyboard = get_webapp_inline_keyboard(self.group_config.id)
             await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=message,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=keyboard
             )
             logger.info(f"[{self.group_config.group}] Warning sent for outage at {outage_start.strftime('%H:%M')}")
             return True

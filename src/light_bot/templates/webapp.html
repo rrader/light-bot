@@ -488,7 +488,8 @@
 
         // Active location
         const urlParams = new URLSearchParams(window.location.search);
-        let currentLocation = urlParams.get('loc') || document.body.dataset.initialLocation || 'home';
+        const startParam = tg?.initDataUnsafe?.start_param;
+        let currentLocation = startParam || urlParams.get('loc') || document.body.dataset.initialLocation || 'home';
 
         function selectLocation(loc) {
             currentLocation = loc;

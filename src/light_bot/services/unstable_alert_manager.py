@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Tuple
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
+from light_bot.core.bot import get_webapp_inline_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,8 @@ class UnstableAlertManager:
             f"Instability persisted for {self.delay_seconds}s at {location_id}. "
             f"Sending Telegram alert with extreme voltage: {extreme_voltage}V (min={min_v}, max={max_v})"
         )
-        self._send_telegram(message, target_chat)
+        keyboard = get_webapp_inline_keyboard(location_id)
+        self._send_telegram(message, target_chat, reply_markup=keyboard)
 
     def calculate_extreme_voltage(
         self,
@@ -202,7 +204,7 @@ class UnstableAlertManager:
             state = self._states.get(location_id)
             return state.get('pending', False) if state else False
 
-    def _send_telegram(self, message: str, chat_id: Optional[str] = None):
+    def _send_telegram(self, message: str, chat_id: Optional[str] = None, reply_markup=None):
         """Send message using an isolated event loop for thread safety"""
         if not self.telegram_bot:
             logger.warning("No telegram bot configured for unstable alert manager")
@@ -211,7 +213,9 @@ class UnstableAlertManager:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(self.telegram_bot.send_message(message, chat_id=chat_id))
+                loop.run_until_complete(
+                    self.telegram_bot.send_message(message, chat_id=chat_id, reply_markup=reply_markup)
+                )
             finally:
                 loop.close()
         except Exception as e:

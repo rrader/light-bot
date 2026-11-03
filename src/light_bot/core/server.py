@@ -7,7 +7,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Optional, Tuple
 from flask import Flask, request, jsonify, render_template, Response
-from light_bot.core.bot import telegram_bot
+from light_bot.core.bot import telegram_bot, get_webapp_inline_keyboard
 from light_bot.core.file_utils import atomic_write_text, read_text
 from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
@@ -543,10 +543,11 @@ def _handle_power_status_update(
 
         if message:
             loop = get_or_create_eventloop()
+            keyboard = get_webapp_inline_keyboard(loc.id)
             if loc.channel_id and loc.channel_id != telegram_bot.channel_id:
-                coro = telegram_bot.send_message(message, chat_id=loc.channel_id)
+                coro = telegram_bot.send_message(message, chat_id=loc.channel_id, reply_markup=keyboard)
             else:
-                coro = telegram_bot.send_message(message)
+                coro = telegram_bot.send_message(message, reply_markup=keyboard)
             loop.run_until_complete(coro)
             notification_sent = True
             logger.info(f"Status changed to {status} for {loc.id}, notification sent")
