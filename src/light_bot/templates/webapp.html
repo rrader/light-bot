@@ -735,14 +735,8 @@
                 } else {
                     liveStatusText.textContent = 'Live';
                     liveStatusText.style.color = '';
+                    liveDot.style.background = 'var(--green)';
                     liveDot.style.animation = 'pulse 2s infinite ease-in-out';
-                    if (currentStatusType === 'on') {
-                        liveDot.style.background = 'var(--green)';
-                    } else if (currentStatusType === 'unstable') {
-                        liveDot.style.background = 'var(--amber)';
-                    } else {
-                        liveDot.style.background = 'var(--red)';
-                    }
                 }
             }
         }
@@ -818,17 +812,14 @@
                 badge.classList.add('status-on');
                 badge.textContent = 'Є СВІТЛО';
                 icon.textContent = '☀️';
-                liveDot.style.background = 'var(--green)';
             } else if (status === 'unstable') {
                 badge.classList.add('status-unstable');
                 badge.textContent = 'НЕСТАБІЛЬНА НАПРУГА';
                 icon.textContent = '🟡';
-                liveDot.style.background = 'var(--amber)';
             } else {
                 badge.classList.add('status-off');
                 badge.textContent = 'НЕМАЄ СВІТЛА';
                 icon.textContent = '🌑';
-                liveDot.style.background = 'var(--red)';
             }
 
             // Emergency Shutdowns check
