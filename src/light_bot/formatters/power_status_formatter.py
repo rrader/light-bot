@@ -90,7 +90,9 @@ class PowerStatusFormatter:
         timestamp: datetime,
         duration_text: Optional[str] = None,
         location_name: Optional[str] = None,
-        voltage: Optional[float] = None
+        voltage: Optional[float] = None,
+        min_voltage: Optional[float] = None,
+        max_voltage: Optional[float] = None
     ) -> str:
         """
         Format message for when grid power is unstable and relay trips
@@ -99,7 +101,9 @@ class PowerStatusFormatter:
             timestamp: Current timestamp when instability detected
             duration_text: Formatted duration text of previous state
             location_name: Optional location display name (e.g. "Вінниця")
-            voltage: Optional line voltage reading
+            voltage: Extreme line voltage reading (furthest from 230V)
+            min_voltage: Optional minimum voltage recorded during period
+            max_voltage: Optional maximum voltage recorded during period
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
         header = f"🟡 <b>В мережі нестабільна напруга ({location_name})!</b> 🟡" if location_name else "🟡 <b>В мережі нестабільна напруга!</b> 🟡"
@@ -110,7 +114,10 @@ class PowerStatusFormatter:
         )
 
         if voltage is not None:
-            message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
+            if min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 5.0:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b> (діапазон: {min_voltage:.1f}–{max_voltage:.1f} В)\n"
+            else:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
 
         message += "⚠️ Реле напруги відімкнуло споживачів від мережі.\n"
 

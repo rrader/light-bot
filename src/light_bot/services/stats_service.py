@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from light_bot.models.power_event import PowerEvent
 from light_bot.models.schedule_history import ScheduleHistory
 from light_bot.config import TIMEZONE
@@ -181,6 +181,37 @@ class StatsService:
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to record voltage reading: {e}")
+
+    def get_voltage_extrema(
+        self,
+        location: str,
+        since: datetime,
+        until: Optional[datetime] = None
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Return (min_voltage, max_voltage) for a location in the given time window, ignoring 0.0V"""
+        try:
+            since_str = since.isoformat()
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                if until:
+                    until_str = until.isoformat()
+                    cursor.execute(
+                        '''SELECT MIN(voltage), MAX(voltage) FROM voltage_readings 
+                           WHERE location = ? AND timestamp >= ? AND timestamp <= ? AND voltage IS NOT NULL AND voltage > 0''',
+                        (location, since_str, until_str)
+                    )
+                else:
+                    cursor.execute(
+                        '''SELECT MIN(voltage), MAX(voltage) FROM voltage_readings 
+                           WHERE location = ? AND timestamp >= ? AND voltage IS NOT NULL AND voltage > 0''',
+                        (location, since_str)
+                    )
+                row = cursor.fetchone()
+                if row and row[0] is not None and row[1] is not None:
+                    return float(row[0]), float(row[1])
+        except Exception as e:
+            logger.error(f"Failed to get voltage extrema: {e}")
+        return None, None
 
     def get_recent_events(self, limit: int = 10, location: Optional[str] = None) -> List[PowerEvent]:
         """Get recent power events, optionally filtered by location"""

@@ -13,9 +13,13 @@ from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
-from light_bot.config import API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS, get_location_config, HA_WEBHOOK_URL
+from light_bot.config import (
+    API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS,
+    get_location_config, HA_WEBHOOK_URL, UNSTABLE_NOTIFICATION_DELAY_SECONDS
+)
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
+from light_bot.services.unstable_alert_manager import UnstableAlertManager
 from light_bot.core.stats_blueprint import create_stats_blueprint
 from light_bot.core.api_blueprint import create_api_blueprint, LLMS_TXT, OPENAPI_SPEC, SWAGGER_HTML
 
@@ -23,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 stats_service = StatsService(DB_PATH)
+unstable_alert_manager = UnstableAlertManager(
+    delay_seconds=UNSTABLE_NOTIFICATION_DELAY_SECONDS,
+    telegram_bot=telegram_bot,
+    stats_service=stats_service
+)
 app.register_blueprint(create_stats_blueprint(stats_service))
 
 
@@ -440,6 +449,9 @@ def _handle_power_status_update(
         except Exception as e:
             logger.warning(f"Failed to update metadata in status file: {e}")
 
+    # Track intermediate voltage in unstable alert manager if pending or active
+    unstable_alert_manager.record_voltage(loc.id, voltage)
+
     # Only send notification if status changed
     notification_sent = False
     if status_changed:
@@ -447,38 +459,58 @@ def _handle_power_status_update(
         loc_display_name = None if loc.id == 'home' else loc.name
         prev_status_str = current_status.get('status', '').lower() if current_status else ''
         was_unstable = (prev_status_str == 'unstable')
+        message = None
 
         if status == 'on':
-            next_outage_info = find_next_outage_for_group(loc.yasno_group) if loc.yasno_group else None
-
-            if next_outage_info:
-                start_time, end_time, is_today = next_outage_info
-                message = PowerStatusFormatter.format_power_on_message(
-                    timestamp,
-                    duration_text,
-                    next_outage_start=start_time,
-                    next_outage_end=end_time,
-                    is_today=is_today,
-                    location_name=loc_display_name,
-                    voltage=voltage,
-                    was_unstable=was_unstable
+            unstable_alert_was_sent = unstable_alert_manager.cancel(loc.id)
+            if was_unstable and not unstable_alert_was_sent:
+                # Voltage spike was short-lived (< delay_seconds) and alert was never sent:
+                # suppress Telegram message completely so user is not spammed.
+                logger.info(
+                    f"Short-lived voltage instability resolved for {loc.id} without notification "
+                    f"(spike lasted < {unstable_alert_manager.delay_seconds}s)"
                 )
+                message = None
             else:
-                message = PowerStatusFormatter.format_power_on_message(
-                    timestamp,
-                    duration_text,
-                    location_name=loc_display_name,
-                    voltage=voltage,
-                    was_unstable=was_unstable
-                )
+                next_outage_info = find_next_outage_for_group(loc.yasno_group) if loc.yasno_group else None
+
+                if next_outage_info:
+                    start_time, end_time, is_today = next_outage_info
+                    message = PowerStatusFormatter.format_power_on_message(
+                        timestamp,
+                        duration_text,
+                        next_outage_start=start_time,
+                        next_outage_end=end_time,
+                        is_today=is_today,
+                        location_name=loc_display_name,
+                        voltage=voltage,
+                        was_unstable=was_unstable
+                    )
+                else:
+                    message = PowerStatusFormatter.format_power_on_message(
+                        timestamp,
+                        duration_text,
+                        location_name=loc_display_name,
+                        voltage=voltage,
+                        was_unstable=was_unstable
+                    )
         elif status == 'unstable':
-            message = PowerStatusFormatter.format_power_unstable_message(
-                timestamp,
-                duration_text,
-                location_name=loc_display_name,
+            # Schedule delayed alert to filter out short-lived spikes;
+            # will pick extreme voltage (furthest from 230V) if sustained.
+            unstable_alert_manager.schedule_unstable_alert(
+                loc,
+                timestamp=now_ts,
+                duration_text=duration_text,
                 voltage=voltage
             )
+            message = None
+            logger.info(
+                f"Status changed to unstable for {loc.id}, Telegram notification delayed by "
+                f"{unstable_alert_manager.delay_seconds}s to filter short spikes"
+            )
         else:
+            # status == 'off'
+            unstable_alert_manager.cancel(loc.id)
             message = PowerStatusFormatter.format_power_off_message(
                 timestamp,
                 duration_text,
@@ -486,14 +518,15 @@ def _handle_power_status_update(
                 voltage=voltage
             )
 
-        loop = get_or_create_eventloop()
-        if loc.channel_id and loc.channel_id != telegram_bot.channel_id:
-            coro = telegram_bot.send_message(message, chat_id=loc.channel_id)
-        else:
-            coro = telegram_bot.send_message(message)
-        loop.run_until_complete(coro)
-        notification_sent = True
-        logger.info(f"Status changed to {status} for {loc.id}, notification sent")
+        if message:
+            loop = get_or_create_eventloop()
+            if loc.channel_id and loc.channel_id != telegram_bot.channel_id:
+                coro = telegram_bot.send_message(message, chat_id=loc.channel_id)
+            else:
+                coro = telegram_bot.send_message(message)
+            loop.run_until_complete(coro)
+            notification_sent = True
+            logger.info(f"Status changed to {status} for {loc.id}, notification sent")
 
         # Notify Home Assistant dedicated webhook
         notify_ha_webhook(
