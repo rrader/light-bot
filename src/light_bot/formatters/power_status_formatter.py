@@ -13,10 +13,11 @@ class PowerStatusFormatter:
         next_outage_end: Optional[str] = None,
         is_today: bool = True,
         location_name: Optional[str] = None,
-        voltage: Optional[float] = None
+        voltage: Optional[float] = None,
+        was_unstable: bool = False
     ) -> str:
         """
-        Format message for when power comes back on
+        Format message for when power comes back on (or stabilizes)
 
         Args:
             timestamp: Current timestamp when power came on
@@ -26,9 +27,13 @@ class PowerStatusFormatter:
             is_today: Whether the next outage is today or tomorrow
             location_name: Optional location display name (e.g. "Вінниця")
             voltage: Optional line voltage reading (e.g. 228.0)
+            was_unstable: Whether the previous state was 'unstable'
         """
         kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
-        header = f"⚡️ <b>Світло з'явилось ({location_name})!</b> ⚡️" if location_name else "⚡️ <b>Світло з'явилось!</b> ⚡️"
+        if was_unstable:
+            header = f"⚡️ <b>Напруга стабілізувалась ({location_name})!</b> ⚡️" if location_name else "⚡️ <b>Напруга стабілізувалась!</b> ⚡️"
+        else:
+            header = f"⚡️ <b>Світло з'явилось ({location_name})!</b> ⚡️" if location_name else "⚡️ <b>Світло з'явилось!</b> ⚡️"
 
         message = (
             f"{header}\n\n"
@@ -36,10 +41,11 @@ class PowerStatusFormatter:
         )
 
         if voltage is not None:
-            message += f"⚡️ Напруга: <b>{voltage:.1f} В</b>\n"
+            message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
 
         if duration_text:
-            message += f"⏱ Відключення тривало: <b>{duration_text}</b>\n"
+            label = "Нестабільність тривала" if was_unstable else "Відключення тривало"
+            message += f"⏱ {label}: <b>{duration_text}</b>\n"
 
         if next_outage_start and next_outage_end:
             day_text = "сьогодні" if is_today else "завтра"

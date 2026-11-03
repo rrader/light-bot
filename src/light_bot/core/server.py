@@ -445,6 +445,8 @@ def _handle_power_status_update(
     if status_changed:
         timestamp = now_ts
         loc_display_name = None if loc.id == 'home' else loc.name
+        prev_status_str = current_status.get('status', '').lower() if current_status else ''
+        was_unstable = (prev_status_str == 'unstable')
 
         if status == 'on':
             next_outage_info = find_next_outage_for_group(loc.yasno_group) if loc.yasno_group else None
@@ -458,14 +460,16 @@ def _handle_power_status_update(
                     next_outage_end=end_time,
                     is_today=is_today,
                     location_name=loc_display_name,
-                    voltage=voltage
+                    voltage=voltage,
+                    was_unstable=was_unstable
                 )
             else:
                 message = PowerStatusFormatter.format_power_on_message(
                     timestamp,
                     duration_text,
                     location_name=loc_display_name,
-                    voltage=voltage
+                    voltage=voltage,
+                    was_unstable=was_unstable
                 )
         elif status == 'unstable':
             message = PowerStatusFormatter.format_power_unstable_message(
