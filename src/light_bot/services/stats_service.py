@@ -70,9 +70,44 @@ class StatsService:
                         timestamp TEXT NOT NULL
                     )
                 ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS bot_channel_buttons (
+                        chat_id TEXT PRIMARY KEY,
+                        message_id INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+
+    def get_last_button_message_id(self, chat_id: str | int) -> Optional[int]:
+        """Get the message_id that currently has the active WebApp button for chat_id"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT message_id FROM bot_channel_buttons WHERE chat_id = ?', (str(chat_id),))
+                row = cursor.fetchone()
+                return int(row[0]) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get last button message id for {chat_id}: {e}")
+            return None
+
+    def set_last_button_message_id(self, chat_id: str | int, message_id: int):
+        """Update or insert the message_id having the active WebApp button"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''INSERT INTO bot_channel_buttons (chat_id, message_id, updated_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, updated_at = excluded.updated_at''',
+                    (str(chat_id), message_id, datetime.now(TIMEZONE).isoformat())
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to set last button message id for {chat_id}: {e}")
 
     def record_schedule_history(self, group_id: str, schedule_text: str, timestamp: datetime):
         """Record a schedule history event"""

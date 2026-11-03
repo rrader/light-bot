@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 stats_service = StatsService(DB_PATH)
+telegram_bot.set_stats_service(stats_service)
 unstable_alert_manager = UnstableAlertManager(
     delay_seconds=UNSTABLE_NOTIFICATION_DELAY_SECONDS,
     telegram_bot=telegram_bot,

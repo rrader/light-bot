@@ -480,12 +480,27 @@ class GroupScheduleSender:
             logger.info(f"[{self.group_config.group}] Formatted message:\n{message}")
 
             keyboard = get_webapp_inline_keyboard(self.group_config.id)
-            await self.bot.send_message(
+            if self.stats_service:
+                try:
+                    prev_id = self.stats_service.get_last_button_message_id(self.channel_id)
+                    if prev_id:
+                        await self.bot.edit_message_reply_markup(
+                            chat_id=self.channel_id,
+                            message_id=prev_id,
+                            reply_markup=None
+                        )
+                except Exception as ex:
+                    logger.debug(f"Failed to strip previous button in {self.channel_id}: {ex}")
+
+            sent_msg = await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=message,
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
+            if self.stats_service and sent_msg:
+                self.stats_service.set_last_button_message_id(self.channel_id, sent_msg.message_id)
+
             logger.info(f"[{self.group_config.group}] Schedule message sent successfully")
             return True
 
@@ -690,12 +705,27 @@ class GroupScheduleSender:
             )
 
             keyboard = get_webapp_inline_keyboard(self.group_config.id)
-            await self.bot.send_message(
+            if self.stats_service:
+                try:
+                    prev_id = self.stats_service.get_last_button_message_id(self.channel_id)
+                    if prev_id:
+                        await self.bot.edit_message_reply_markup(
+                            chat_id=self.channel_id,
+                            message_id=prev_id,
+                            reply_markup=None
+                        )
+                except Exception as ex:
+                    logger.debug(f"Failed to strip previous button in {self.channel_id}: {ex}")
+
+            sent_msg = await self.bot.send_message(
                 chat_id=self.channel_id,
                 text=message,
                 parse_mode='HTML',
                 reply_markup=keyboard
             )
+            if self.stats_service and sent_msg:
+                self.stats_service.set_last_button_message_id(self.channel_id, sent_msg.message_id)
+
             logger.info(f"[{self.group_config.group}] Warning sent for outage at {outage_start.strftime('%H:%M')}")
             return True
 
