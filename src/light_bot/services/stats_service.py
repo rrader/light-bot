@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from light_bot.models.power_event import PowerEvent
 from light_bot.models.schedule_history import ScheduleHistory
 from light_bot.config import TIMEZONE, DB_PATH
@@ -212,6 +212,32 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get voltage extrema: {e}")
         return None, None
+
+    def get_latest_reading(self, location: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent telemetry reading from voltage_readings table"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''SELECT timestamp, voltage, source, before_relay, after_relay
+                       FROM voltage_readings
+                       WHERE location = ?
+                       ORDER BY id DESC LIMIT 1''',
+                    (location,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'timestamp': row[0],
+                        'voltage': row[1],
+                        'source': row[2],
+                        'before_relay': bool(row[3]) if row[3] is not None else None,
+                        'after_relay': bool(row[4]) if row[4] is not None else None,
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting latest reading for {location}: {e}")
+            return None
 
     def get_recent_events(self, limit: int = 10, location: Optional[str] = None) -> List[PowerEvent]:
         """Get recent power events, optionally filtered by location"""

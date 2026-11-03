@@ -545,11 +545,24 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                 'yasno_group': actual_group,
                 'city': group_cfg.city if group_cfg else 'kiev'
             }
-            if st.get('voltage') is not None:
+
+            # Supplement with the freshest voltage reading from telemetry table if available
+            loc_id = loc.id if loc else 'home'
+            latest_rd = stats_service.get_latest_reading(loc_id) if stats_service else None
+            if latest_rd:
+                if latest_rd.get('voltage') is not None:
+                    resp_data['voltage'] = latest_rd['voltage']
+                if latest_rd.get('before_relay') is not None:
+                    resp_data['before_relay'] = latest_rd['before_relay']
+                if latest_rd.get('after_relay') is not None:
+                    resp_data['after_relay'] = latest_rd['after_relay']
+                resp_data['telemetry_timestamp'] = latest_rd.get('timestamp')
+
+            if 'voltage' not in resp_data and st.get('voltage') is not None:
                 resp_data['voltage'] = st.get('voltage')
-            if st.get('before_relay') is not None:
+            if 'before_relay' not in resp_data and st.get('before_relay') is not None:
                 resp_data['before_relay'] = st.get('before_relay')
-            if st.get('after_relay') is not None:
+            if 'after_relay' not in resp_data and st.get('after_relay') is not None:
                 resp_data['after_relay'] = st.get('after_relay')
             if st.get('source') is not None:
                 resp_data['source'] = st.get('source')
@@ -588,11 +601,23 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                 'yasno_group': actual_group,
                 'city': group_cfg.city if group_cfg else 'kiev'
             }
-            if st.get('voltage') is not None:
+
+            # Supplement with the freshest voltage reading from telemetry table if available
+            latest_rd = stats_service.get_latest_reading(loc.id) if stats_service else None
+            if latest_rd:
+                if latest_rd.get('voltage') is not None:
+                    resp_data['voltage'] = latest_rd['voltage']
+                if latest_rd.get('before_relay') is not None:
+                    resp_data['before_relay'] = latest_rd['before_relay']
+                if latest_rd.get('after_relay') is not None:
+                    resp_data['after_relay'] = latest_rd['after_relay']
+                resp_data['telemetry_timestamp'] = latest_rd.get('timestamp')
+
+            if 'voltage' not in resp_data and st.get('voltage') is not None:
                 resp_data['voltage'] = st.get('voltage')
-            if st.get('before_relay') is not None:
+            if 'before_relay' not in resp_data and st.get('before_relay') is not None:
                 resp_data['before_relay'] = st.get('before_relay')
-            if st.get('after_relay') is not None:
+            if 'after_relay' not in resp_data and st.get('after_relay') is not None:
                 resp_data['after_relay'] = st.get('after_relay')
             if st.get('source') is not None:
                 resp_data['source'] = st.get('source')
@@ -681,6 +706,21 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                     ev_item['after_relay'] = e.after_relay
                 if e.source is not None:
                     ev_item['source'] = e.source
+
+                # If event was unstable, compute min and max voltage during the interval if possible
+                if e.status == 'unstable' and stats_service and e.location:
+                    since_ts = e.timestamp
+                    until_ts = None
+                    if i > 0:
+                        # the more recent event ended this unstable period
+                        until_ts = events[i - 1].timestamp
+                    try:
+                        v_min, v_max = stats_service.get_voltage_extrema(e.location, since_ts, until=until_ts)
+                        if v_min is not None and v_max is not None:
+                            ev_item['voltage_min'] = round(v_min, 1)
+                            ev_item['voltage_max'] = round(v_max, 1)
+                    except Exception as ve:
+                        logger.debug(f"Failed to fetch voltage extrema for event {e.id}: {ve}")
                 result.append(ev_item)
             return jsonify(result), 200
         except Exception as e:

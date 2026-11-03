@@ -349,7 +349,14 @@
         }
 
         .sched-seg.emergency {
-            background: var(--gray-track);
+            background: #141416;
+            background-image: repeating-linear-gradient(
+                45deg,
+                rgba(255, 255, 255, 0.03),
+                rgba(255, 255, 255, 0.03) 10px,
+                transparent 10px,
+                transparent 20px
+            );
         }
 
         /* Segments: Track 2 (Fact / Real Light) */
@@ -372,6 +379,49 @@
 
         .fact-seg.future {
             background: transparent;
+        }
+
+        /* Tooltip popup for hovering timeline segments */
+        .timeline-tooltip {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(18, 18, 20, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            padding: 6px 10px;
+            color: #ffffff;
+            font-size: 11px;
+            line-height: 1.35;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.15s ease, transform 0.15s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+
+        .timeline-tooltip.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-2px);
+        }
+
+        .timeline-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 5px;
+            border-style: solid;
+            border-color: rgba(18, 18, 20, 0.95) transparent transparent transparent;
+        }
+
+        .sched-seg, .fact-seg {
+            cursor: pointer;
         }
 
         /* 24-hour grid overlay */
@@ -539,6 +589,9 @@
                         <span class="track-tag">Факт</span>
                     </div>
 
+                    <!-- Floating tooltip for segment inspect -->
+                    <div class="timeline-tooltip" id="timelineTooltip"></div>
+
                     <!-- 24 hourly vertical grid dividers -->
                     <div class="timeline-grid" id="timelineGrid"></div>
 
@@ -636,9 +689,64 @@
         setInterval(updateCursor, 10000);
         updateCursor();
 
-        // State holder for duration recalculation
+        // State holder for duration recalculation and last sync badge
         let currentStatusStart = null;
         let currentStatusType = 'on';
+        let lastSyncTime = new Date();
+        let lastTelemetryTime = null; // Server's latest telemetry timestamp
+
+        function tickSyncBadge() {
+            const updatedEl = document.getElementById('updatedVal');
+            const liveDot = document.getElementById('liveDot');
+            const liveStatusText = document.getElementById('liveStatusText');
+
+            if (updatedEl && lastSyncTime) {
+                const diffSec = Math.floor((new Date() - lastSyncTime) / 1000);
+                if (diffSec < 15) {
+                    updatedEl.textContent = 'щойно';
+                } else if (diffSec < 60) {
+                    updatedEl.textContent = `${diffSec} с тому`;
+                } else {
+                    updatedEl.textContent = `${Math.floor(diffSec / 60)} хв тому`;
+                }
+            }
+
+            // Check freshness of telemetry data (or screen sync): if > 10 minutes without telemetry, mark Offline
+            let isStale = false;
+            const now = new Date();
+            if (lastTelemetryTime && !isNaN(lastTelemetryTime.getTime())) {
+                const telemetryAgeSec = (now - lastTelemetryTime) / 1000;
+                if (telemetryAgeSec > 600) { // 10 minutes
+                    isStale = true;
+                }
+            } else if (lastSyncTime) {
+                const syncAgeSec = (now - lastSyncTime) / 1000;
+                if (syncAgeSec > 600) {
+                    isStale = true;
+                }
+            }
+
+            if (liveDot && liveStatusText) {
+                if (isStale) {
+                    liveDot.style.background = '#8e8e93';
+                    liveDot.style.animation = 'none';
+                    liveStatusText.textContent = 'Offline';
+                    liveStatusText.style.color = '#8e8e93';
+                } else {
+                    liveStatusText.textContent = 'Live';
+                    liveStatusText.style.color = '';
+                    liveDot.style.animation = 'pulse 2s infinite ease-in-out';
+                    if (currentStatusType === 'on') {
+                        liveDot.style.background = 'var(--green)';
+                    } else if (currentStatusType === 'unstable') {
+                        liveDot.style.background = 'var(--amber)';
+                    } else {
+                        liveDot.style.background = 'var(--red)';
+                    }
+                }
+            }
+        }
+        setInterval(tickSyncBadge, 2000);
 
         function tickDuration() {
             if (!currentStatusStart) return;
@@ -677,6 +785,8 @@
                     console.warn("Events not available:", e);
                 }
 
+                lastSyncTime = new Date();
+                tickSyncBadge();
                 renderView(statusData, scheduleData, eventsData);
             } catch (e) {
                 console.error("Failed to load status:", e);
@@ -687,6 +797,13 @@
             const isHome = (currentLocation === 'home');
             document.getElementById('headerTitle').textContent = isHome ? 'Світло • Дім / 53.1' : 'Світло • Вінниця / 2.1';
             document.getElementById('pageSubtitle').textContent = isHome ? 'Графік та мережа • Київ' : 'Графік та мережа • Вінниця';
+
+            // Store server telemetry timestamp if present
+            if (statusInfo.telemetry_timestamp) {
+                lastTelemetryTime = new Date(statusInfo.telemetry_timestamp);
+            } else if (statusInfo.timestamp) {
+                lastTelemetryTime = new Date(statusInfo.timestamp);
+            }
 
             const status = (statusInfo.status || 'unknown').toLowerCase();
             currentStatusType = status;
@@ -782,23 +899,33 @@
                 relayEl.style.color = (status === 'on' ? 'var(--green)' : 'var(--red)');
             }
 
-            // Relative updated time
-            if (statusInfo.timestamp) {
-                const updateTime = new Date(statusInfo.timestamp);
-                const ageSec = Math.floor((new Date() - updateTime) / 1000);
-                if (ageSec < 60) {
-                    document.getElementById('updatedVal').textContent = 'щойно';
-                } else if (ageSec < 3600) {
-                    document.getElementById('updatedVal').textContent = `${Math.floor(ageSec / 60)} хв тому`;
-                } else {
-                    document.getElementById('updatedVal').textContent = updateTime.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-                }
-            } else {
-                document.getElementById('updatedVal').textContent = 'щойно';
-            }
+            // Relative updated time: kept updated by tickSyncBadge() based on lastSyncTime
+            tickSyncBadge();
 
             // Render 2-track timeline (Schedule + Fact)
             renderDualTimeline(scheduleInfo, eventsList, status);
+        }
+
+        function showTimelineTooltip(e, text) {
+            const tooltip = document.getElementById('timelineTooltip');
+            if (!tooltip) return;
+            tooltip.innerHTML = text;
+            tooltip.classList.add('visible');
+
+            const wrapper = document.querySelector('.timeline-bar-wrapper');
+            if (wrapper) {
+                const rect = wrapper.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const clampedX = Math.max(50, Math.min(x, rect.width - 50));
+                tooltip.style.left = `${clampedX}px`;
+            }
+        }
+
+        function hideTimelineTooltip() {
+            const tooltip = document.getElementById('timelineTooltip');
+            if (tooltip) {
+                tooltip.classList.remove('visible');
+            }
         }
 
         function renderDualTimeline(scheduleInfo, eventsList, currentStatus) {
@@ -829,10 +956,16 @@
             let nextOutageText = '--';
 
             if (isEmergency || slots.length === 0) {
-                // When emergency shutdowns: make timeline GRAY, not green
+                // When emergency shutdowns: make timeline dark gray/black pattern, not green
                 const seg = document.createElement('div');
                 seg.className = 'sched-seg emergency';
                 seg.style.width = '100%';
+
+                const labelText = isEmergency ? '🚨 Екстрені відключення (графік не діє)' : 'Графік відключень відсутній';
+                seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
+                seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
+                seg.addEventListener('mouseleave', hideTimelineTooltip);
+
                 schedContainer.appendChild(seg);
 
                 boundaryMinutes.push(1440);
@@ -847,15 +980,27 @@
                     seg.style.width = `${widthPct}%`;
 
                     const isOutage = (slot.type === 'Definite' || slot.type === 'Maybe');
+                    let statusLabel = 'Світло за графіком';
                     if (isOutage) {
                         seg.classList.add(slot.type === 'Maybe' ? 'maybe' : 'off');
                         scheduledOutageMins += duration;
+                        statusLabel = (slot.type === 'Maybe' ? 'Можливе відключення' : 'Відключення за графіком');
                         if (slot.start > currentMins && nextOutageText === '--') {
                             nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
                         }
                     } else {
                         seg.classList.add('on');
                     }
+
+                    const durHours = Math.floor(duration / 60);
+                    const durMins = duration % 60;
+                    const durText = (durHours > 0 ? `${durHours} год ` : '') + (durMins > 0 ? `${durMins} хв` : '');
+                    const tipText = `<b>План:</b> ${statusLabel}<br>Час: <b>${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}</b> (${durText})`;
+
+                    seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mouseleave', hideTimelineTooltip);
+
                     schedContainer.appendChild(seg);
 
                     if (!boundaryMinutes.includes(slot.start)) boundaryMinutes.push(slot.start);
@@ -878,6 +1023,36 @@
                 const seg = document.createElement('div');
                 seg.className = `fact-seg ${segData.status}`;
                 seg.style.width = `${widthPct}%`;
+
+                // Tooltip for fact segment
+                let statusLabel = 'Є світло (норма)';
+                if (segData.status === 'unstable') {
+                    statusLabel = 'Нестабільна напруга';
+                } else if (segData.status === 'off') {
+                    statusLabel = 'Немає світла (відключення)';
+                } else if (segData.status === 'future') {
+                    statusLabel = 'Майбутній час';
+                }
+
+                const durHours = Math.floor(duration / 60);
+                const durMins = duration % 60;
+                const durText = (durHours > 0 ? `${durHours} год ` : '') + (durMins > 0 ? `${durMins} хв` : '');
+                let tipText = `<b>Факт:</b> ${statusLabel}<br>Час: <b>${minsToTimeStr(segData.start)} – ${minsToTimeStr(segData.end)}</b> (${durText})`;
+
+                if (segData.status === 'unstable') {
+                    if (segData.voltage_min !== undefined && segData.voltage_max !== undefined) {
+                        tipText += `<br>Діапазон: <b>${segData.voltage_min} – ${segData.voltage_max} В</b>`;
+                    } else if (segData.voltage !== undefined) {
+                        tipText += `<br>Напруга: <b>${segData.voltage} В</b>`;
+                    }
+                }
+
+                if (segData.status !== 'future') {
+                    seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mouseleave', hideTimelineTooltip);
+                }
+
                 factContainer.appendChild(seg);
 
                 if (segData.status === 'off' || segData.status === 'unstable') {
@@ -922,7 +1097,13 @@
                     const parts = kyivTimeStr.split(':');
                     const mins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
                     let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
-                    todayEvents.push({ mins, status: st });
+                    todayEvents.push({
+                        mins,
+                        status: st,
+                        voltage: e.voltage,
+                        voltage_min: e.voltage_min,
+                        voltage_max: e.voltage_max
+                    });
                 }
             });
 
@@ -950,7 +1131,14 @@
                     const ev = todayEvents[i];
                     const nextMins = (i + 1 < todayEvents.length) ? todayEvents[i + 1].mins : currentMins;
                     if (nextMins > ev.mins) {
-                        intervals.push({ start: ev.mins, end: nextMins, status: ev.status });
+                        intervals.push({
+                            start: ev.mins,
+                            end: nextMins,
+                            status: ev.status,
+                            voltage: ev.voltage,
+                            voltage_min: ev.voltage_min,
+                            voltage_max: ev.voltage_max
+                        });
                     }
                 }
             }
@@ -960,7 +1148,14 @@
             intervals.forEach(inv => {
                 if (inv.end <= inv.start) return;
                 if (merged.length > 0 && merged[merged.length - 1].status === inv.status) {
-                    merged[merged.length - 1].end = inv.end;
+                    const last = merged[merged.length - 1];
+                    last.end = inv.end;
+                    if (inv.voltage_min !== undefined) {
+                        last.voltage_min = (last.voltage_min !== undefined) ? Math.min(last.voltage_min, inv.voltage_min) : inv.voltage_min;
+                    }
+                    if (inv.voltage_max !== undefined) {
+                        last.voltage_max = (last.voltage_max !== undefined) ? Math.max(last.voltage_max, inv.voltage_max) : inv.voltage_max;
+                    }
                 } else {
                     merged.push({ ...inv });
                 }
