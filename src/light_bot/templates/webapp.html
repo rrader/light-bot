@@ -82,17 +82,27 @@
         }
 
         .top-bar-title a {
-            color: inherit;
-            text-decoration: none;
+            color: #007aff;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            text-decoration-thickness: 1.5px;
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            transition: opacity 0.15s ease;
+            transition: opacity 0.15s ease, color 0.15s ease;
+        }
+
+        body.dark .top-bar-title a {
+            color: #2997ff;
         }
 
         .top-bar-title a:hover {
             opacity: 0.8;
-            text-decoration: underline;
+            color: #0056b3;
+        }
+
+        body.dark .top-bar-title a:hover {
+            color: #64b5f6;
         }
 
         .top-bar-title svg {
