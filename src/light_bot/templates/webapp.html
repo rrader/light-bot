@@ -22,6 +22,8 @@
             --amber: #d96b00;
             --amber-gradient-1: #8a5005;
             --amber-gradient-2: #573102;
+            --gray-track: #52525b;
+            --gray-track-dark: #3f3f46;
         }
 
         body.dark {
@@ -31,6 +33,8 @@
             --text-secondary: #98989d;
             --border-color: #2c2c2e;
             --stat-bg: #242426;
+            --gray-track: #3f3f46;
+            --gray-track-dark: #27272a;
         }
 
         * {
@@ -83,39 +87,27 @@
             fill: currentColor;
         }
 
-        /* Location Tabs */
-        .location-tabs {
+        .live-box {
             display: flex;
-            background: var(--card-bg);
-            border-radius: 14px;
-            padding: 4px;
-            border: 1px solid var(--border-color);
-            gap: 4px;
-        }
-
-        .tab-btn {
-            flex: 1;
-            padding: 8px 12px;
-            border-radius: 10px;
-            border: none;
-            background: transparent;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
             color: var(--text-secondary);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-align: center;
+            font-weight: 500;
         }
 
-        .tab-btn.active {
-            background: var(--stat-bg);
-            color: var(--text-color);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite ease-in-out;
         }
 
-        body.dark .tab-btn.active {
-            background: #2c2c2e;
-            color: #ffffff;
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
         }
 
         /* Main Card */
@@ -180,6 +172,26 @@
             background-color: var(--amber);
         }
 
+        /* Emergency warning banner */
+        .emergency-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 14px;
+            font-size: 13px;
+            color: #dc2626;
+            font-weight: 600;
+        }
+
+        body.dark .emergency-banner {
+            background: rgba(239, 68, 68, 0.18);
+            border-color: rgba(239, 68, 68, 0.45);
+            color: #f87171;
+        }
+
         /* Subtitles & Telemetry */
         .status-meta {
             display: flex;
@@ -223,57 +235,146 @@
             opacity: 0.5;
         }
 
-        /* Timeline schedule bar */
+        /* Timeline schedule & fact section */
         .timeline-section {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
             margin-top: 4px;
         }
 
+        .timeline-legend {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 0 4px;
+        }
+
+        .legend-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-dots {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-dots .dot-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-dots .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot-green { background: #22c55e; }
+        .dot-amber { background: #f59e0b; }
+        .dot-gray { background: #64748b; }
+
+        /* Split 2-track timeline container */
         .timeline-bar-wrapper {
             position: relative;
             width: 100%;
-            height: 44px;
+            height: 52px;
             border-radius: 14px;
-            background: #142e18;
-            border: 2px solid #0f2312;
+            background: #141416;
+            border: 2px solid #222226;
             overflow: hidden;
             box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
         }
 
         body.dark .timeline-bar-wrapper {
-            border-color: #1a381e;
+            border-color: #2c2c30;
         }
 
-        .timeline-bar-segments {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
+        .timeline-track {
+            position: relative;
             width: 100%;
-            height: 100%;
+            height: 24px;
+            display: flex;
+            overflow: hidden;
         }
 
-        .bar-segment {
+        .timeline-track-divider {
+            width: 100%;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            z-index: 5;
+        }
+
+        .track-tag {
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.7);
+            z-index: 6;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        }
+
+        /* Segments: Track 1 (Schedule) */
+        .sched-seg {
             height: 100%;
             position: relative;
         }
 
-        .bar-segment.on {
+        .sched-seg.on {
             background: linear-gradient(180deg, var(--green-gradient-1) 0%, var(--green-gradient-2) 100%);
         }
 
-        .bar-segment.off {
+        .sched-seg.off {
             background: linear-gradient(180deg, var(--red-gradient-1) 0%, var(--red-gradient-2) 100%);
         }
 
-        .bar-segment.unstable {
+        .sched-seg.maybe {
             background: linear-gradient(180deg, var(--amber-gradient-1) 0%, var(--amber-gradient-2) 100%);
         }
 
+        .sched-seg.emergency {
+            background: var(--gray-track);
+        }
+
+        /* Segments: Track 2 (Fact / Real Light) */
+        .fact-seg {
+            height: 100%;
+            position: relative;
+        }
+
+        .fact-seg.on {
+            background: linear-gradient(180deg, #1f7a30 0%, #155722 100%);
+        }
+
+        .fact-seg.unstable {
+            background: linear-gradient(180deg, #d97706 0%, #92400e 100%);
+        }
+
+        .fact-seg.off {
+            background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+        }
+
+        .fact-seg.future {
+            background: transparent;
+        }
+
+        /* 24-hour grid overlay */
         .timeline-grid {
             position: absolute;
             top: 0;
@@ -282,6 +383,7 @@
             bottom: 0;
             display: flex;
             pointer-events: none;
+            z-index: 7;
         }
 
         .timeline-grid-cell {
@@ -294,26 +396,26 @@
             border-right: none;
         }
 
-        /* Current time cursor line */
+        /* Cursor line across both tracks */
         .timeline-cursor {
             position: absolute;
             top: 0;
             bottom: 0;
             width: 3px;
             background: #ffffff;
-            box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.9);
+            box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.95);
             z-index: 10;
             transform: translateX(-50%);
             border-radius: 2px;
             pointer-events: none;
         }
 
-        /* Timeline Labels */
+        /* Timeline Labels below */
         .timeline-labels {
             position: relative;
             width: 100%;
             height: 18px;
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .timeline-tick-label {
@@ -358,30 +460,6 @@
             font-weight: 700;
             color: var(--text-color);
         }
-
-        /* Live status dot in header */
-        .pulse-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--green);
-            animation: pulse 2s infinite ease-in-out;
-        }
-
-        @keyframes pulse {
-            0% { transform: scale(0.9); opacity: 0.7; }
-            50% { transform: scale(1.3); opacity: 1; }
-            100% { transform: scale(0.9); opacity: 0.7; }
-        }
-
-        .live-box {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            font-weight: 500;
-        }
     </style>
 </head>
 <body data-initial-location="{{ initial_location or 'home' }}">
@@ -400,12 +478,6 @@
             </div>
         </div>
 
-        <!-- Location selector tabs -->
-        <div class="location-tabs">
-            <button class="tab-btn active" id="tabHome" onclick="selectLocation('home')">🏠 Дім (Київ / 53.1)</button>
-            <button class="tab-btn" id="tabVinnytsia" onclick="selectLocation('vinnytsia')">🏙 Вінниця (2.1)</button>
-        </div>
-
         <!-- Main Card -->
         <div class="main-card">
             <!-- Header -->
@@ -415,6 +487,12 @@
                     <div class="header-title" id="headerTitle">Світло • Дім / 53.1</div>
                 </div>
                 <div class="status-badge status-on" id="statusBadge">Є СВІТЛО</div>
+            </div>
+
+            <!-- Emergency Warning Banner (hidden when normal) -->
+            <div class="emergency-banner" id="emergencyBanner" style="display: none;">
+                <span>🚨</span>
+                <span><b>Екстрені відключення!</b> Погодинні графіки наразі скасовано.</span>
             </div>
 
             <!-- Status Subtitles -->
@@ -432,16 +510,42 @@
                 <span class="pill" id="updatedPill">Оновлено: <b id="updatedVal">щойно</b></span>
             </div>
 
-            <!-- 24-hour visual timeline bar -->
+            <!-- 2-Track visual timeline bar -->
             <div class="timeline-section">
+                <!-- Legend -->
+                <div class="timeline-legend">
+                    <div class="legend-left">
+                        <span>ПЛАН ТА ФАКТ (24 ГОДИНИ)</span>
+                    </div>
+                    <div class="legend-dots">
+                        <span class="dot-item"><span class="dot dot-green"></span> є</span>
+                        <span class="dot-item"><span class="dot dot-amber"></span> нестаб.</span>
+                        <span class="dot-item"><span class="dot dot-gray"></span> нема</span>
+                    </div>
+                </div>
+
+                <!-- Split Container -->
                 <div class="timeline-bar-wrapper">
-                    <!-- Segments from schedule -->
-                    <div class="timeline-bar-segments" id="timelineSegments"></div>
+                    <!-- Top Track: Schedule -->
+                    <div class="timeline-track" id="timelineScheduleTrack">
+                        <span class="track-tag">План</span>
+                    </div>
+
+                    <!-- Horizontal divider -->
+                    <div class="timeline-track-divider"></div>
+
+                    <!-- Bottom Track: Fact (Real light) -->
+                    <div class="timeline-track" id="timelineFactTrack">
+                        <span class="track-tag">Факт</span>
+                    </div>
+
                     <!-- 24 hourly vertical grid dividers -->
                     <div class="timeline-grid" id="timelineGrid"></div>
-                    <!-- White current time cursor -->
+
+                    <!-- White current time cursor line -->
                     <div class="timeline-cursor" id="timelineCursor" style="left: 50%;"></div>
                 </div>
+
                 <!-- Time ticks below bar -->
                 <div class="timeline-labels" id="timelineLabels"></div>
             </div>
@@ -449,7 +553,7 @@
             <!-- Bottom stat cards -->
             <div class="stat-grid">
                 <div class="stat-box">
-                    <div class="stat-label">Всього за добу без світла</div>
+                    <div class="stat-label" id="leftStatLabel">Всього за добу без світла</div>
                     <div class="stat-value" id="outageStatVal">--</div>
                 </div>
                 <div class="stat-box">
@@ -486,20 +590,18 @@
             gridEl.appendChild(cell);
         }
 
-        // Active location
-        const urlParams = new URLSearchParams(window.location.search);
-        const startParam = tg?.initDataUnsafe?.start_param;
-        let currentLocation = startParam || urlParams.get('loc') || document.body.dataset.initialLocation || 'home';
-
-        function selectLocation(loc) {
-            currentLocation = loc;
-            document.getElementById('tabHome').classList.toggle('active', loc === 'home');
-            document.getElementById('tabVinnytsia').classList.toggle('active', loc === 'vinnytsia');
-            if (tg?.HapticFeedback) {
-                tg.HapticFeedback.impactOccurred('light');
-            }
-            fetchData();
+        // Resolve active location: URL path (/app/kyiv, /app/vinnytsia), query (?loc=), start_param, or dataset
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+        let pathLoc = null;
+        if (pathParts.length >= 2 && pathParts[0] === 'app') {
+            pathLoc = pathParts[1].toLowerCase();
+            if (pathLoc === 'kyiv' || pathLoc === 'kiev') pathLoc = 'home';
         }
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryLoc = urlParams.get('loc');
+        const startParam = tg?.initDataUnsafe?.start_param;
+        let currentLocation = pathLoc || queryLoc || startParam || document.body.dataset.initialLocation || 'home';
+        if (currentLocation === 'kyiv' || currentLocation === 'kiev') currentLocation = 'home';
 
         // Helper to format minutes into HH:MM
         function minsToTimeStr(mins) {
@@ -564,10 +666,10 @@
                     console.warn("Schedule not available:", e);
                 }
 
-                // 3. Fetch recent events to find when current status began
+                // 3. Fetch recent events to compute fact track and status duration
                 let eventsData = [];
                 try {
-                    const evRes = await fetch(`/api/events?limit=10&location=${currentLocation}`);
+                    const evRes = await fetch(`/api/events?limit=100&location=${currentLocation}`);
                     if (evRes.ok) {
                         eventsData = await evRes.json();
                     }
@@ -592,6 +694,7 @@
             const badge = document.getElementById('statusBadge');
             const icon = document.getElementById('headerIcon');
             const liveDot = document.getElementById('liveDot');
+            const emergencyBanner = document.getElementById('emergencyBanner');
 
             badge.className = 'status-badge';
             if (status === 'on') {
@@ -611,10 +714,21 @@
                 liveDot.style.background = 'var(--red)';
             }
 
+            // Emergency Shutdowns check
+            const todaySchedule = scheduleInfo?.schedule?.today;
+            const isEmergency = (todaySchedule?.status === 'EmergencyShutdowns');
+            if (isEmergency) {
+                emergencyBanner.style.display = 'flex';
+                if (status === 'off') {
+                    icon.textContent = '🚨';
+                }
+            } else {
+                emergencyBanner.style.display = 'none';
+            }
+
             // Determine status start time from events or status timestamp
             let startTime = null;
             if (eventsList && eventsList.length > 0) {
-                // Find latest event matching current status
                 const matchEv = eventsList.find(e => (e.status || (e.on ? 'on' : 'off')) === status);
                 if (matchEv && (matchEv.timestamp || matchEv.t)) {
                     startTime = new Date(matchEv.timestamp || matchEv.t);
@@ -683,87 +797,181 @@
                 document.getElementById('updatedVal').textContent = 'щойно';
             }
 
-            // Schedule Timeline Bar
-            renderTimelineBar(scheduleInfo, status);
+            // Render 2-track timeline (Schedule + Fact)
+            renderDualTimeline(scheduleInfo, eventsList, status);
         }
 
-        function renderTimelineBar(scheduleInfo, currentStatus) {
-            const container = document.getElementById('timelineSegments');
+        function renderDualTimeline(scheduleInfo, eventsList, currentStatus) {
+            const schedContainer = document.getElementById('timelineScheduleTrack');
+            const factContainer = document.getElementById('timelineFactTrack');
             const labelsContainer = document.getElementById('timelineLabels');
-            container.innerHTML = '';
+
+            // Reset tracks while preserving track-tag
+            schedContainer.innerHTML = '<span class="track-tag">План</span>';
+            factContainer.innerHTML = '<span class="track-tag">Факт</span>';
             labelsContainer.innerHTML = '';
-
-            const today = scheduleInfo?.schedule?.today;
-            const slots = today?.slots || [];
-            const schedStatus = today?.status;
-
-            let totalOutageMins = 0;
-            let nextOutageText = '--';
 
             const now = new Date();
             const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
             const parts = kyivTimeStr.split(':');
             const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
 
-            if (schedStatus === 'EmergencyShutdowns' || slots.length === 0) {
-                // Emergency or no planned schedule
+            // ==========================================
+            // 1. TOP TRACK: SCHEDULE
+            // ==========================================
+            const today = scheduleInfo?.schedule?.today;
+            const slots = today?.slots || [];
+            const schedStatus = today?.status;
+            const isEmergency = (schedStatus === 'EmergencyShutdowns');
+
+            const boundaryMinutes = [0];
+            let scheduledOutageMins = 0;
+            let nextOutageText = '--';
+
+            if (isEmergency || slots.length === 0) {
+                // When emergency shutdowns: make timeline GRAY, not green
                 const seg = document.createElement('div');
-                seg.className = `bar-segment ${currentStatus === 'off' ? 'off' : currentStatus === 'unstable' ? 'unstable' : 'on'}`;
+                seg.className = 'sched-seg emergency';
                 seg.style.width = '100%';
-                container.appendChild(seg);
+                schedContainer.appendChild(seg);
 
-                // Default boundary labels 00:00 and 24:00
-                addLabel(labelsContainer, 0, '00:00');
-                addLabel(labelsContainer, 1440, '24:00');
+                boundaryMinutes.push(1440);
+                document.getElementById('rightStatLabel').textContent = '🚨 Стан графіка';
+                document.getElementById('rightStatVal').textContent = (isEmergency ? 'Екстрені відключення' : 'Без відключень');
+            } else {
+                slots.forEach(slot => {
+                    const duration = slot.end - slot.start;
+                    const widthPct = (duration / 1440) * 100;
+                    const seg = document.createElement('div');
+                    seg.className = 'sched-seg';
+                    seg.style.width = `${widthPct}%`;
 
-                document.getElementById('outageStatVal').textContent = (schedStatus === 'EmergencyShutdowns' ? 'Екстрені відключення' : 'Без відключень');
-                document.getElementById('rightStatLabel').textContent = 'Стан мережі';
-                document.getElementById('rightStatVal').textContent = (currentStatus === 'on' ? 'Штатно' : currentStatus === 'unstable' ? 'Нестабільно' : 'Аварійно');
-                return;
+                    const isOutage = (slot.type === 'Definite' || slot.type === 'Maybe');
+                    if (isOutage) {
+                        seg.classList.add(slot.type === 'Maybe' ? 'maybe' : 'off');
+                        scheduledOutageMins += duration;
+                        if (slot.start > currentMins && nextOutageText === '--') {
+                            nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
+                        }
+                    } else {
+                        seg.classList.add('on');
+                    }
+                    schedContainer.appendChild(seg);
+
+                    if (!boundaryMinutes.includes(slot.start)) boundaryMinutes.push(slot.start);
+                    if (!boundaryMinutes.includes(slot.end) && slot.end < 1440) boundaryMinutes.push(slot.end);
+                });
+
+                document.getElementById('rightStatLabel').textContent = 'Наступне відключення';
+                document.getElementById('rightStatVal').textContent = nextOutageText;
             }
 
-            // Collect slot boundary minutes for labels
-            const boundaryMinutes = [0];
+            // ==========================================
+            // 2. BOTTOM TRACK: FACT (REAL LIGHT)
+            // ==========================================
+            const factSegments = buildFactSegments(eventsList, currentStatus, currentMins);
+            let factOutageMins = 0;
 
-            slots.forEach(slot => {
-                const duration = slot.end - slot.start;
+            factSegments.forEach(segData => {
+                const duration = segData.end - segData.start;
                 const widthPct = (duration / 1440) * 100;
                 const seg = document.createElement('div');
-                seg.className = 'bar-segment';
+                seg.className = `fact-seg ${segData.status}`;
                 seg.style.width = `${widthPct}%`;
+                factContainer.appendChild(seg);
 
-                const isOutage = (slot.type === 'Definite' || slot.type === 'Maybe');
-                if (isOutage) {
-                    seg.classList.add(slot.type === 'Maybe' ? 'unstable' : 'off');
-                    totalOutageMins += duration;
-                    if (slot.start > currentMins && nextOutageText === '--') {
-                        nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
-                    }
-                } else {
-                    seg.classList.add('on');
-                }
-                container.appendChild(seg);
-
-                if (!boundaryMinutes.includes(slot.start)) {
-                    boundaryMinutes.push(slot.start);
-                }
-                if (!boundaryMinutes.includes(slot.end) && slot.end < 1440) {
-                    boundaryMinutes.push(slot.end);
+                if (segData.status === 'off' || segData.status === 'unstable') {
+                    factOutageMins += duration;
                 }
             });
 
-            // Render labels placed at slot boundaries
+            // Update left stat card: show scheduled or fact outage hours
+            if (isEmergency) {
+                document.getElementById('leftStatLabel').textContent = 'Всього за добу без світла (факт)';
+                const fH = Math.floor(factOutageMins / 60);
+                const fM = factOutageMins % 60;
+                document.getElementById('outageStatVal').textContent = `${fH} год ${fM} хв`;
+            } else {
+                document.getElementById('leftStatLabel').textContent = 'Всього за добу за графіком';
+                const outHours = Math.floor(scheduledOutageMins / 60);
+                const outPct = Math.round((scheduledOutageMins / 1440) * 100);
+                document.getElementById('outageStatVal').textContent = `${outHours} год (${outPct}%)`;
+            }
+
+            // ==========================================
+            // 3. BOUNDARY LABELS
+            // ==========================================
             boundaryMinutes.sort((a, b) => a - b).forEach(mins => {
                 addLabel(labelsContainer, mins, minsToTimeStr(mins));
             });
+        }
 
-            // Update bottom stats
-            const outHours = Math.floor(totalOutageMins / 60);
-            const outPct = Math.round((totalOutageMins / 1440) * 100);
-            document.getElementById('outageStatVal').textContent = `${outHours} год (${outPct}%)`;
+        // Reconstruct fact segments from today's events: green (on), yellow (unstable), gray (off)
+        function buildFactSegments(eventsList, currentStatus, currentMins) {
+            const now = new Date();
+            const kyivDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' }); // YYYY-MM-DD
+            const todayEvents = [];
 
-            document.getElementById('rightStatLabel').textContent = 'Наступне відключення';
-            document.getElementById('rightStatVal').textContent = nextOutageText;
+            (eventsList || []).forEach(e => {
+                const rawTs = e.timestamp || e.t;
+                if (!rawTs) return;
+                const d = new Date(rawTs);
+                const eventKyivDate = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' });
+                if (eventKyivDate === kyivDateStr) {
+                    const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                    const parts = kyivTimeStr.split(':');
+                    const mins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+                    let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
+                    todayEvents.push({ mins, status: st });
+                }
+            });
+
+            todayEvents.sort((a, b) => a.mins - b.mins);
+
+            const intervals = [];
+
+            if (todayEvents.length === 0) {
+                // Steady state all day
+                intervals.push({ start: 0, end: currentMins, status: currentStatus });
+            } else {
+                const firstEv = todayEvents[0];
+                let initialStatus = 'on';
+                if (firstEv.status === 'on') {
+                    initialStatus = 'off';
+                } else if (firstEv.status === 'off' || firstEv.status === 'unstable') {
+                    initialStatus = 'on';
+                }
+
+                if (firstEv.mins > 0) {
+                    intervals.push({ start: 0, end: firstEv.mins, status: initialStatus });
+                }
+
+                for (let i = 0; i < todayEvents.length; i++) {
+                    const ev = todayEvents[i];
+                    const nextMins = (i + 1 < todayEvents.length) ? todayEvents[i + 1].mins : currentMins;
+                    if (nextMins > ev.mins) {
+                        intervals.push({ start: ev.mins, end: nextMins, status: ev.status });
+                    }
+                }
+            }
+
+            // Merge contiguous identical statuses
+            const merged = [];
+            intervals.forEach(inv => {
+                if (inv.end <= inv.start) return;
+                if (merged.length > 0 && merged[merged.length - 1].status === inv.status) {
+                    merged[merged.length - 1].end = inv.end;
+                } else {
+                    merged.push({ ...inv });
+                }
+            });
+
+            // Future segment from current minute to 24:00
+            if (currentMins < 1440) {
+                merged.push({ start: currentMins, end: 1440, status: 'future' });
+            }
+
+            return merged;
         }
 
         function addLabel(parent, mins, text) {
@@ -784,7 +992,7 @@
         }
 
         // Initial fetch and 10s auto-refresh
-        selectLocation(currentLocation);
+        fetchData();
         setInterval(fetchData, 10000);
     </script>
 </body>

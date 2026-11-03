@@ -9,9 +9,11 @@ logger = logging.getLogger(__name__)
 
 def get_webapp_inline_keyboard(location_id: Optional[str] = 'home') -> InlineKeyboardMarkup:
     """Get inline keyboard with Web App direct link for channel posts"""
-    app_url = "https://t.me/power_po2_bot/app"
-    if location_id and location_id != 'home':
-        app_url = f"{app_url}?startapp={location_id}"
+    loc = (location_id or 'home').lower()
+    if loc in ['vinnytsia', 'vinnitsa', 'vn']:
+        app_url = "https://t.me/power_po2_bot/app?startapp=vinnytsia"
+    else:
+        app_url = "https://t.me/power_po2_bot/app?startapp=home"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(text="⚡️ Графік та статус", url=app_url)]
     ])
