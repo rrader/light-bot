@@ -463,15 +463,34 @@ def _handle_power_status_update(
 
         if status == 'on':
             unstable_alert_was_sent, min_v, max_v = unstable_alert_manager.cancel(loc.id)
-            if was_unstable and not unstable_alert_was_sent:
-                # Voltage spike was short-lived (< delay_seconds) and alert was never sent:
+
+            # Check duration from current_status timestamp to prevent false suppression across restarts
+            last_ts = current_status.get('timestamp') if current_status else None
+            unstable_duration_sec = 0.0
+            if last_ts and isinstance(last_ts, datetime):
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=TIMEZONE)
+                unstable_duration_sec = max(0.0, (now_ts - last_ts).total_seconds())
+
+            # Sustained if alert was explicitly fired OR duration was >= delay_seconds
+            sustained_instability = unstable_alert_was_sent or (was_unstable and unstable_duration_sec >= unstable_alert_manager.delay_seconds)
+
+            if was_unstable and not sustained_instability:
+                # Voltage spike was truly short-lived (< delay_seconds) and alert was never sent:
                 # suppress Telegram message completely so user is not spammed.
                 logger.info(
                     f"Short-lived voltage instability resolved for {loc.id} without notification "
-                    f"(spike lasted < {unstable_alert_manager.delay_seconds}s)"
+                    f"(spike lasted {unstable_duration_sec:.1f}s < {unstable_alert_manager.delay_seconds}s)"
                 )
                 message = None
             else:
+                if was_unstable and (min_v is None or max_v is None) and stats_service and last_ts:
+                    db_min, db_max = stats_service.get_voltage_extrema(loc.id, since=last_ts)
+                    if db_min is not None and min_v is None:
+                        min_v = db_min
+                    if db_max is not None and max_v is None:
+                        max_v = db_max
+
                 next_outage_info = find_next_outage_for_group(loc.yasno_group) if loc.yasno_group else None
 
                 if next_outage_info:

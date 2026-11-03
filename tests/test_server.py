@@ -136,6 +136,33 @@ class TestPowerStatusEndpoint:
 
             assert response.status_code == 200
 
+    def test_stabilization_sent_when_unstable_was_sustained_across_restart(self, client, temp_power_file):
+        """Test that voltage stabilization message is sent when previous state was unstable for >= 180s"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Simulate existing file on disk where instability started 30 mins ago
+        past_time = (datetime.now(TIMEZONE) - timedelta(minutes=30)).isoformat()
+        with open(temp_power_file, 'w') as f:
+            f.write("unstable\n")
+            f.write(f"Last updated: {past_time}\n")
+            f.write("Voltage: 275.0\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot.send_message', new_callable=AsyncMock) as mock_send:
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'Bearer test_api_token_123'},
+                                   json={'status': 'on', 'voltage': 225.0})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status_changed'] is True
+            assert data['notification_sent'] is True
+            assert mock_send.called
+            sent_msg = mock_send.call_args[0][0]
+            assert "стабілізувалась" in sent_msg
+
     def test_get_power_status_no_auth(self, client):
         """Test get status without authentication returns 401"""
         response = client.get('/power-status')
