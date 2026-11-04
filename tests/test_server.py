@@ -163,6 +163,48 @@ class TestPowerStatusEndpoint:
             sent_msg = mock_send.call_args[0][0]
             assert "стабілізувалась" in sent_msg
 
+    def test_power_on_sent_after_brief_unstable_following_outage(self, client, temp_power_file):
+        """Test that power ON message is sent when unstable was a brief relay delay after an outage"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+        from light_bot.core.server import stats_service
+
+        with stats_service._get_conn() as conn:
+            conn.execute("DELETE FROM power_events WHERE location = 'home'")
+
+        now = datetime.now(TIMEZONE)
+        ten_mins_ago = now - timedelta(minutes=10)
+        twenty_secs_ago = now - timedelta(seconds=20)
+
+        # Record 'off' in DB as prior event
+        stats_service.record_event(
+            status='off',
+            timestamp=ten_mins_ago,
+            location='home',
+            voltage=0.0
+        )
+
+        # Set status file to unstable (20s ago, simulating relay waiting delay)
+        with open(temp_power_file, 'w') as f:
+            f.write("unstable\n")
+            f.write(f"Last updated: {twenty_secs_ago.isoformat()}\n")
+            f.write("Voltage: 248.0\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot.send_message', new_callable=AsyncMock) as mock_send:
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'Bearer test_api_token_123'},
+                                   json={'status': 'on', 'voltage': 247.0})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status_changed'] is True
+            assert data['notification_sent'] is True
+            assert mock_send.called
+            sent_msg = mock_send.call_args[0][0]
+            assert "Світло з'явилось" in sent_msg
+
     def test_get_power_status_no_auth(self, client):
         """Test get status without authentication returns 401"""
         response = client.get('/power-status')

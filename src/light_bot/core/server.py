@@ -499,9 +499,17 @@ def _handle_power_status_update(
             if was_unstable and stats_service:
                 try:
                     # Fetch recent events for this location to see what was before 'unstable'
-                    recent_events = stats_service.get_recent_events(limit=5, location=loc.id)
-                    # Filter events older than last_ts (or skip the current unstable event)
+                    recent_events = stats_service.get_recent_events(limit=20, location=loc.id)
+                    # Filter events older than last_ts (skip the newly recorded event and current unstable event)
                     for ev in recent_events:
+                        ev_ts = ev.timestamp
+                        if ev_ts is not None:
+                            if ev_ts.tzinfo is None:
+                                ev_ts = TIMEZONE.localize(ev_ts)
+                            if last_ts and ev_ts >= last_ts:
+                                continue
+                            if ev_ts >= now_ts:
+                                continue
                         ev_status = ev.status.lower()
                         if ev_status == 'unstable':
                             continue
