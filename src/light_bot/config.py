@@ -23,6 +23,8 @@ API_TOKEN = os.getenv('API_TOKEN')
 # Unstable Power Alert Configuration
 # Delay in seconds to wait before sending Telegram alert for 'unstable' status (filters short spikes)
 UNSTABLE_NOTIFICATION_DELAY_SECONDS = int(os.getenv('UNSTABLE_NOTIFICATION_DELAY_SECONDS', '180'))
+# Delay in seconds to wait before sending Telegram alert for 'off' status (filters transient sub-minute glitches)
+OUTAGE_NOTIFICATION_DELAY_SECONDS = int(os.getenv('OUTAGE_NOTIFICATION_DELAY_SECONDS', '40'))
 
 # Home Assistant Webhook Configuration
 HA_WEBHOOK_URL = os.getenv('HA_WEBHOOK_URL')

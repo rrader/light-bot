@@ -30,11 +30,21 @@ class UnstableAlertManager:
         nominal_voltage: float = 230.0
     ):
         self.delay_seconds = delay_seconds
-        self.telegram_bot = telegram_bot
+        self._telegram_bot = telegram_bot
         self.stats_service = stats_service
         self.nominal_voltage = nominal_voltage
         self._lock = threading.Lock()
         self._states: Dict[str, dict] = {}
+
+    @property
+    def telegram_bot(self):
+        if self._telegram_bot is not None:
+            return self._telegram_bot
+        try:
+            import light_bot.core.server as srv
+            return getattr(srv, 'telegram_bot', None)
+        except Exception:
+            return None
 
     def record_voltage(self, location_id: str, voltage: Optional[float]):
         """Record intermediate voltage readings while unstable alert is pending or active"""
@@ -92,6 +102,9 @@ class UnstableAlertManager:
                 f"(initial voltage: {voltage}V)"
             )
 
+    def _get_bot(self):
+        return self.telegram_bot
+
     def _on_timer_fired(self, location_id: str):
         """Callback when instability persisted for delay_seconds"""
         state = None
@@ -129,7 +142,8 @@ class UnstableAlertManager:
             max_voltage=max_v
         )
 
-        target_chat = location.channel_id or (self.telegram_bot.channel_id if self.telegram_bot else None)
+        bot = self._get_bot()
+        target_chat = location.channel_id or (bot.channel_id if bot else None)
         logger.info(
             f"Instability persisted for {self.delay_seconds}s at {location_id}. "
             f"Sending Telegram alert with extreme voltage: {extreme_voltage}V (min={min_v}, max={max_v})"
@@ -205,18 +219,23 @@ class UnstableAlertManager:
             return state.get('pending', False) if state else False
 
     def _send_telegram(self, message: str, chat_id: Optional[str] = None, reply_markup=None):
-        """Send message using an isolated event loop for thread safety"""
-        if not self.telegram_bot:
+        """Send message using thread's event loop"""
+        bot = self._get_bot()
+        if not bot:
             logger.warning("No telegram bot configured for unstable alert manager")
             return
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(
-                    self.telegram_bot.send_message(message, chat_id=chat_id, reply_markup=reply_markup)
-                )
-            finally:
-                loop.close()
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            loop.run_until_complete(
+                bot.send_message(message, chat_id=chat_id, reply_markup=reply_markup)
+            )
         except Exception as e:
             logger.error(f"Failed to send delayed unstable alert to Telegram: {e}")

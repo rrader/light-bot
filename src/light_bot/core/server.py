@@ -15,11 +15,13 @@ from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno_client
 from light_bot.config import (
     API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS,
-    get_location_config, HA_WEBHOOK_URL, UNSTABLE_NOTIFICATION_DELAY_SECONDS
+    get_location_config, HA_WEBHOOK_URL, UNSTABLE_NOTIFICATION_DELAY_SECONDS,
+    OUTAGE_NOTIFICATION_DELAY_SECONDS
 )
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
 from light_bot.services.unstable_alert_manager import UnstableAlertManager
+from light_bot.services.outage_alert_manager import OutageAlertManager
 from light_bot.core.stats_blueprint import create_stats_blueprint
 from light_bot.core.api_blueprint import create_api_blueprint, LLMS_TXT, OPENAPI_SPEC, SWAGGER_HTML
 
@@ -30,8 +32,10 @@ stats_service = StatsService(DB_PATH)
 telegram_bot.set_stats_service(stats_service)
 unstable_alert_manager = UnstableAlertManager(
     delay_seconds=UNSTABLE_NOTIFICATION_DELAY_SECONDS,
-    telegram_bot=telegram_bot,
     stats_service=stats_service
+)
+outage_alert_manager = OutageAlertManager(
+    delay_seconds=OUTAGE_NOTIFICATION_DELAY_SECONDS
 )
 app.register_blueprint(create_stats_blueprint(stats_service))
 
@@ -61,7 +65,12 @@ def get_or_create_eventloop():
     """Get or create event loop for async Telegram operations"""
     global _loop
     try:
-        return asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            _loop = loop
+        return loop
     except RuntimeError:
         _loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_loop)
@@ -460,21 +469,29 @@ def _handle_power_status_update(
         loc_display_name = None if loc.id == 'home' else loc.name
         prev_status_str = current_status.get('status', '').lower() if current_status else ''
         was_unstable = (prev_status_str == 'unstable')
+        was_off = (prev_status_str == 'off')
         message = None
 
         if status == 'on':
             unstable_alert_was_sent, min_v, max_v = unstable_alert_manager.cancel(loc.id)
+            outage_alert_was_sent = outage_alert_manager.cancel(loc.id)
 
             # Check duration from current_status timestamp to prevent false suppression across restarts
             last_ts = current_status.get('timestamp') if current_status else None
             unstable_duration_sec = 0.0
+            off_duration_sec = 0.0
             if last_ts and isinstance(last_ts, datetime):
                 if last_ts.tzinfo is None:
                     last_ts = last_ts.replace(tzinfo=TIMEZONE)
-                unstable_duration_sec = max(0.0, (now_ts - last_ts).total_seconds())
+                elapsed = max(0.0, (now_ts - last_ts).total_seconds())
+                if was_unstable:
+                    unstable_duration_sec = elapsed
+                elif was_off:
+                    off_duration_sec = elapsed
 
             # Sustained if alert was explicitly fired OR duration was >= delay_seconds
             sustained_instability = unstable_alert_was_sent or (was_unstable and unstable_duration_sec >= unstable_alert_manager.delay_seconds)
+            sustained_outage = outage_alert_was_sent or (was_off and off_duration_sec >= outage_alert_manager.delay_seconds)
 
             # Check previous event before instability to know if light was OFF beforehand
             prior_was_off = False
@@ -501,6 +518,14 @@ def _handle_power_status_update(
                 logger.info(
                     f"Short-lived voltage instability resolved for {loc.id} without notification "
                     f"(spike lasted {unstable_duration_sec:.1f}s < {unstable_alert_manager.delay_seconds}s)"
+                )
+                message = None
+            elif was_off and not sustained_outage:
+                # Outage was a brief sub-minute glitch (< delay_seconds), and alert was never sent.
+                # Suppress Telegram message so user is not spammed.
+                logger.info(
+                    f"Short-lived outage glitch resolved for {loc.id} without notification "
+                    f"(glitch lasted {off_duration_sec:.1f}s < {outage_alert_manager.delay_seconds}s)"
                 )
                 message = None
             else:
@@ -551,6 +576,7 @@ def _handle_power_status_update(
                         max_voltage=max_v if effective_was_unstable else None
                     )
         elif status == 'unstable':
+            outage_alert_manager.cancel(loc.id)
             # Schedule delayed alert to filter out short-lived spikes;
             # will pick extreme voltage (furthest from 230V) if sustained.
             unstable_alert_manager.schedule_unstable_alert(
@@ -567,11 +593,18 @@ def _handle_power_status_update(
         else:
             # status == 'off'
             unstable_alert_manager.cancel(loc.id)
-            message = PowerStatusFormatter.format_power_off_message(
-                timestamp,
-                duration_text,
-                location_name=loc_display_name,
+            outage_alert_manager.schedule_outage_alert(
+                loc,
+                timestamp=now_ts,
+                duration_text=duration_text,
                 voltage=voltage
+            )
+            message = None
+            if outage_alert_manager.delay_seconds <= 0:
+                notification_sent = True
+            logger.info(
+                f"Status changed to off for {loc.id}, Telegram notification delayed by "
+                f"{outage_alert_manager.delay_seconds}s to filter transient glitches"
             )
 
         if message:
