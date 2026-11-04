@@ -30,7 +30,8 @@ class UnstableAlertManager:
         nominal_voltage: float = 230.0,
         frequent_threshold: int = 3,
         frequent_window_seconds: int = 3600,
-        frequent_cooldown_seconds: int = 7200
+        frequent_cooldown_seconds: int = 7200,
+        stabilization_seconds: int = 3600
     ):
         self.delay_seconds = delay_seconds
         self._telegram_bot = telegram_bot
@@ -39,10 +40,12 @@ class UnstableAlertManager:
         self.frequent_threshold = frequent_threshold
         self.frequent_window_seconds = frequent_window_seconds
         self.frequent_cooldown_seconds = frequent_cooldown_seconds
+        self.stabilization_seconds = stabilization_seconds
         self._lock = threading.Lock()
         self._states: Dict[str, dict] = {}
         self._unstable_history: Dict[str, list] = {}
         self._last_frequent_alert_sent: Dict[str, datetime] = {}
+        self._stabilization_timers: Dict[str, threading.Timer] = {}
 
     @property
     def telegram_bot(self):
@@ -77,11 +80,16 @@ class UnstableAlertManager:
     ):
         """
         Schedule a delayed notification for unstable power.
-        If cutoffs exceed frequent_threshold (> 3) within frequent_window_seconds (1h),
+        If cutoffs reach frequent_threshold (3) within frequent_window_seconds (1h),
         send a frequent instability alert immediately (rate-limited by frequent_cooldown_seconds).
         """
         location_id = location.id
         with self._lock:
+            # Any new instability interrupts the one-hour stable period.
+            stabilization_timer = self._stabilization_timers.pop(location_id, None)
+            if stabilization_timer:
+                stabilization_timer.cancel()
+
             # 1. Track this cutoff in event history
             history = self._unstable_history.setdefault(location_id, [])
             history.append(timestamp)
@@ -104,9 +112,9 @@ class UnstableAlertManager:
                     logger.warning(f"Could not count unstable events from DB for {location_id}: {ex}")
             event_count = max(len(history), db_count)
 
-            # 2. Check if frequent cutoffs threshold exceeded (> 3 in window)
+            # 2. Alert once the configured count is reached (3 by default).
             frequent_triggered = False
-            if event_count > self.frequent_threshold:
+            if event_count >= self.frequent_threshold:
                 last_alert = self._last_frequent_alert_sent.get(location_id)
                 if last_alert is None or (timestamp - last_alert).total_seconds() >= self.frequent_cooldown_seconds:
                     frequent_triggered = True
@@ -136,7 +144,7 @@ class UnstableAlertManager:
                 logger.info(
                     f"Frequent instability threshold exceeded for {location_id}: "
                     f"{event_count} cutoffs in last {self.frequent_window_seconds}s "
-                    f"(threshold > {self.frequent_threshold}). Sending Telegram alert immediately."
+                    f"(threshold {self.frequent_threshold}). Sending Telegram alert immediately."
                 )
                 self._send_frequent_alert(location, timestamp, event_count, voltage)
             else:
@@ -153,6 +161,65 @@ class UnstableAlertManager:
                     f"Scheduled delayed unstable alert for {location_id} in {self.delay_seconds}s "
                     f"(cutoff {event_count}/{self.frequent_threshold} in window, initial voltage: {voltage}V)"
                 )
+
+    def schedule_stabilization_alert(
+        self,
+        location,
+        voltage: Optional[float] = None,
+        min_voltage: Optional[float] = None,
+        max_voltage: Optional[float] = None
+    ):
+        """Send a recovery notice only after power remains stable for one hour."""
+        location_id = location.id
+        with self._lock:
+            old_timer = self._stabilization_timers.pop(location_id, None)
+            if old_timer:
+                old_timer.cancel()
+
+            timer = threading.Timer(
+                self.stabilization_seconds,
+                self._on_stabilization_timer_fired,
+                args=(location, voltage, min_voltage, max_voltage)
+            )
+            timer.daemon = True
+            self._stabilization_timers[location_id] = timer
+            timer.start()
+        logger.info(
+            f"Scheduled stabilization notice for {location_id} after "
+            f"{self.stabilization_seconds}s without instability"
+        )
+
+    def _on_stabilization_timer_fired(
+        self,
+        location,
+        voltage: Optional[float],
+        min_voltage: Optional[float],
+        max_voltage: Optional[float]
+    ):
+        location_id = location.id
+        with self._lock:
+            self._stabilization_timers.pop(location_id, None)
+
+        message = PowerStatusFormatter.format_power_on_message(
+            datetime.now().astimezone(),
+            location_name=None if location_id == 'home' else location.name,
+            voltage=voltage,
+            was_unstable=True,
+            min_voltage=min_voltage,
+            max_voltage=max_voltage
+        )
+        bot = self._get_bot()
+        target_chat = location.channel_id or (bot.channel_id if bot else None)
+        keyboard = get_webapp_inline_keyboard(location_id)
+        logger.info(f"Power remained stable for one hour at {location_id}; sending recovery notice")
+        self._send_telegram(message, target_chat, reply_markup=keyboard)
+
+    def cancel_stabilization_alert(self, location_id: str):
+        """Cancel a pending recovery notice when instability resumes."""
+        with self._lock:
+            timer = self._stabilization_timers.pop(location_id, None)
+            if timer:
+                timer.cancel()
 
     def _send_frequent_alert(
         self,
