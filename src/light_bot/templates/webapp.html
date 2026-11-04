@@ -401,7 +401,14 @@
         }
 
         .fact-seg.unstable {
-            background: linear-gradient(180deg, #d97706 0%, #92400e 100%);
+            background: #facc15;
+            background: linear-gradient(180deg, #fef08a 0%, #eab308 50%, #ca8a04 100%);
+            box-shadow: 0 0 8px 1px rgba(250, 204, 21, 0.85);
+            min-width: 6px;
+            flex-shrink: 0;
+            cursor: pointer;
+            z-index: 9;
+            border-radius: 1px;
         }
 
         .fact-seg.off {
@@ -1058,7 +1065,7 @@
             // 2. BOTTOM TRACK: FACT (REAL LIGHT)
             // ==========================================
             const factSegments = buildFactSegments(eventsList, currentStatus, currentMins);
-            let factOutageMins = 0;
+            let factOutageSec = 0;
 
             factSegments.forEach(segData => {
                 const duration = segData.end - segData.start;
@@ -1077,15 +1084,40 @@
                     statusLabel = 'Майбутній час';
                 }
 
-                const durHours = Math.floor(duration / 60);
-                const durMins = duration % 60;
-                const durText = (durHours > 0 ? `${durHours} год ` : '') + (durMins > 0 ? `${durMins} хв` : '');
-                let tipText = `<b>Факт:</b> ${statusLabel}<br>Час: <b>${minsToTimeStr(segData.start)} – ${minsToTimeStr(segData.end)}</b> (${durText})`;
+                const totalSec = segData.durationSec !== undefined ? segData.durationSec : Math.round(duration * 60);
+                let durText = '';
+                if (totalSec < 60) {
+                    durText = `${totalSec} сек`;
+                } else {
+                    const durHours = Math.floor(totalSec / 3600);
+                    const durMins = Math.floor((totalSec % 3600) / 60);
+                    const durSecs = totalSec % 60;
+                    if (durHours > 0) {
+                        durText = `${durHours} год` + (durMins > 0 ? ` ${durMins} хв` : '');
+                    } else if (durMins > 0) {
+                        durText = `${durMins} хв` + (durSecs > 0 ? ` ${durSecs} сек` : '');
+                    }
+                }
+
+                let timeRangeStr = '';
+                if (segData.startDate && segData.endDate) {
+                    const sStr = segData.startDate.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                    const eStr = segData.endDate.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                    if (totalSec < 60) {
+                        timeRangeStr = `${sStr} – ${eStr}`;
+                    } else {
+                        timeRangeStr = `${sStr.slice(0, 5)} – ${eStr.slice(0, 5)}`;
+                    }
+                } else {
+                    timeRangeStr = `${minsToTimeStr(segData.start)} – ${minsToTimeStr(segData.end)}`;
+                }
+
+                let tipText = `<b>Факт:</b> ${statusLabel}<br>Час: <b>${timeRangeStr}</b> (${durText})`;
 
                 if (segData.status === 'unstable') {
-                    if (segData.voltage_min !== undefined && segData.voltage_max !== undefined) {
+                    if (segData.voltage_min !== undefined && segData.voltage_max !== undefined && segData.voltage_min !== segData.voltage_max) {
                         tipText += `<br>Діапазон: <b>${segData.voltage_min} – ${segData.voltage_max} В</b>`;
-                    } else if (segData.voltage !== undefined) {
+                    } else if (segData.voltage !== undefined && segData.voltage !== null && Number(segData.voltage) > 0) {
                         tipText += `<br>Напруга: <b>${segData.voltage} В</b>`;
                     }
                 }
@@ -1100,13 +1132,14 @@
                 factContainer.appendChild(seg);
 
                 if (segData.status === 'off' || segData.status === 'unstable') {
-                    factOutageMins += duration;
+                    factOutageSec += totalSec;
                 }
             });
 
             // Update left stat card: show scheduled or fact outage hours
             if (isEmergency) {
                 document.getElementById('leftStatLabel').textContent = 'Всього за добу без світла (факт)';
+                const factOutageMins = Math.floor(factOutageSec / 60);
                 const fH = Math.floor(factOutageMins / 60);
                 const fM = factOutageMins % 60;
                 document.getElementById('outageStatVal').textContent = `${fH} год ${fM} хв`;
@@ -1139,12 +1172,14 @@
                 const eventKyivDate = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' });
                 const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
                 const parts = kyivTimeStr.split(':');
-                const mins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+                const secs = (parseInt(parts[0], 10) * 3600) + (parseInt(parts[1], 10) * 60) + parseInt(parts[2], 10);
+                const mins = secs / 60;
                 let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
 
                 const parsed = {
                     date: eventKyivDate,
                     mins,
+                    secs,
                     status: st,
                     voltage: e.voltage,
                     voltage_min: e.voltage_min,
@@ -1181,20 +1216,41 @@
 
             if (todayEvents.length === 0) {
                 // Steady state all day
-                intervals.push({ start: 0, end: currentMins, status: initialStatus });
+                intervals.push({
+                    start: 0,
+                    end: currentMins,
+                    startDate: new Date(new Date().setHours(0,0,0,0)),
+                    endDate: now,
+                    durationSec: Math.round(currentMins * 60),
+                    status: initialStatus
+                });
             } else {
                 const firstEv = todayEvents[0];
                 if (firstEv.mins > 0) {
-                    intervals.push({ start: 0, end: firstEv.mins, status: initialStatus });
+                    intervals.push({
+                        start: 0,
+                        end: firstEv.mins,
+                        startDate: new Date(new Date().setHours(0,0,0,0)),
+                        endDate: firstEv.rawDate,
+                        durationSec: Math.max(1, Math.round(firstEv.mins * 60)),
+                        status: initialStatus
+                    });
                 }
 
                 for (let i = 0; i < todayEvents.length; i++) {
                     const ev = todayEvents[i];
-                    const nextMins = (i + 1 < todayEvents.length) ? todayEvents[i + 1].mins : currentMins;
-                    if (nextMins > ev.mins) {
+                    const nextEv = (i + 1 < todayEvents.length) ? todayEvents[i + 1] : null;
+                    const nextMins = nextEv ? nextEv.mins : currentMins;
+                    const nextDate = nextEv ? nextEv.rawDate : now;
+                    const durSec = Math.max(1, Math.round((nextDate - ev.rawDate) / 1000));
+
+                    if (nextMins > ev.mins || ev.status === 'unstable') {
                         intervals.push({
                             start: ev.mins,
-                            end: nextMins,
+                            end: Math.max(nextMins, ev.mins + 0.1),
+                            startDate: ev.rawDate,
+                            endDate: nextDate,
+                            durationSec: durSec,
                             status: ev.status,
                             voltage: ev.voltage,
                             voltage_min: ev.voltage_min,
@@ -1204,26 +1260,35 @@
                 }
             }
 
-            // Filter out transient noise/glitches (< 2 minutes) where an 'off' or 'unstable' spike immediately reverts
+            // Filter out transient noise/glitches (< 2 minutes) where an 'off' spike immediately reverts
+            // NEVER swallow 'unstable' events: user explicitly wants to see every detected instability
             const debounced = [];
             for (let i = 0; i < intervals.length; i++) {
                 const cur = intervals[i];
+                if (cur.status === 'unstable') {
+                    debounced.push(cur);
+                    continue;
+                }
                 const dur = cur.end - cur.start;
                 // If a transient glitch of 1 minute occurs between two segments of the same status, bridge them
-                if (dur <= 1 && i > 0 && i + 1 < intervals.length && intervals[i - 1].status === intervals[i + 1].status) {
+                if (dur <= 1 && i > 0 && i + 1 < intervals.length && intervals[i - 1].status === intervals[i + 1].status && intervals[i - 1].status !== 'unstable') {
                     intervals[i - 1].end = cur.end; // expand previous to swallow the glitch
+                    intervals[i - 1].endDate = cur.endDate;
+                    intervals[i - 1].durationSec = (intervals[i - 1].durationSec || 0) + (cur.durationSec || 0);
                     continue;
                 }
                 debounced.push(cur);
             }
 
-            // Merge contiguous identical statuses
+            // Merge contiguous identical statuses (keep discrete instabilities distinguishable)
             const merged = [];
             debounced.forEach(inv => {
                 if (inv.end <= inv.start) return;
-                if (merged.length > 0 && merged[merged.length - 1].status === inv.status) {
+                if (merged.length > 0 && merged[merged.length - 1].status === inv.status && inv.status !== 'unstable') {
                     const last = merged[merged.length - 1];
                     last.end = inv.end;
+                    last.endDate = inv.endDate;
+                    last.durationSec = (last.durationSec || 0) + (inv.durationSec || 0);
                     if (inv.voltage_min !== undefined) {
                         last.voltage_min = (last.voltage_min !== undefined) ? Math.min(last.voltage_min, inv.voltage_min) : inv.voltage_min;
                     }
