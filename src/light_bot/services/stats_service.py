@@ -54,9 +54,20 @@ class StatsService:
                         voltage REAL,
                         before_relay INTEGER,
                         after_relay INTEGER,
-                        source TEXT
+                        source TEXT,
+                        voltage_min REAL,
+                        voltage_max REAL
                     )
                 ''')
+                # Migrate voltage_readings table if columns are missing
+                for col_name, col_type in [
+                    ("voltage_min", "REAL"),
+                    ("voltage_max", "REAL"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE voltage_readings ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass
                 cursor.execute('''
                     CREATE INDEX IF NOT EXISTS idx_voltage_readings_loc_ts 
                     ON voltage_readings(location, timestamp)
@@ -197,7 +208,9 @@ class StatsService:
         voltage: Optional[float] = None,
         before_relay: Optional[bool] = None,
         after_relay: Optional[bool] = None,
-        source: Optional[str] = None
+        source: Optional[str] = None,
+        voltage_min: Optional[float] = None,
+        voltage_max: Optional[float] = None
     ):
         """Record a telemetry/voltage reading to voltage_readings table"""
         try:
@@ -209,9 +222,9 @@ class StatsService:
                 cursor = conn.cursor()
                 cursor.execute(
                     '''INSERT INTO voltage_readings 
-                       (timestamp, location, voltage, before_relay, after_relay, source) 
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (timestamp_str, location, voltage, before_int, after_int, source)
+                       (timestamp, location, voltage, before_relay, after_relay, source, voltage_min, voltage_max) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (timestamp_str, location, voltage, before_int, after_int, source, voltage_min, voltage_max)
                 )
                 conn.commit()
         except Exception as e:
@@ -247,6 +260,100 @@ class StatsService:
         except Exception as e:
             logger.error(f"Failed to get voltage extrema: {e}")
         return None, None
+
+    def get_voltage_anomalies(
+        self,
+        location: str,
+        since: datetime,
+        until: Optional[datetime] = None,
+        min_threshold: float = 207.0,
+        max_threshold: float = 253.0
+    ) -> List[Dict[str, Any]]:
+        """
+        Find contiguous time windows in voltage_readings where voltage was outside [min_threshold, max_threshold]
+        while grid power was present (before_relay=1, after_relay=1, voltage >= 160V to exclude line disconnects).
+        """
+        try:
+            since_str = since.isoformat()
+            query = '''
+                SELECT id, timestamp, voltage, voltage_min, voltage_max, before_relay, after_relay
+                FROM voltage_readings
+                WHERE location = ? AND timestamp >= ? AND voltage IS NOT NULL AND voltage > 0
+            '''
+            params = [location, since_str]
+            if until:
+                query += ' AND timestamp <= ?'
+                params.append(until.isoformat())
+            query += ' ORDER BY id'
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, tuple(params))
+                rows = cursor.fetchall()
+
+            anomalies = []
+            current_group = []
+
+            for r in rows:
+                rid = r[0]
+                ts_str = r[1]
+                v = r[2]
+                br = r[5]
+                ar = r[6]
+                # Voltage instability: 160 <= v < min_threshold OR v > max_threshold, while power supplied (br=1, ar=1)
+                is_anom = (br == 1 and ar == 1 and ((v >= 160.0 and v < min_threshold) or v > max_threshold))
+                if is_anom:
+                    current_group.append(r)
+                else:
+                    if current_group:
+                        anomalies.append(current_group)
+                        current_group = []
+            if current_group:
+                anomalies.append(current_group)
+
+            result = []
+            for anom in anomalies:
+                start_id = anom[0][0]
+                start_ts_str = anom[0][1]
+                end_ts_str = anom[-1][1]
+                try:
+                    start_dt = datetime.fromisoformat(start_ts_str)
+                except Exception:
+                    continue
+                try:
+                    end_dt = datetime.fromisoformat(end_ts_str)
+                except Exception:
+                    end_dt = start_dt
+
+                all_min = []
+                all_max = []
+                for x in anom:
+                    v_val = float(x[2])
+                    vmin_val = float(x[3]) if len(x) > 3 and x[3] is not None else v_val
+                    vmax_val = float(x[4]) if len(x) > 4 and x[4] is not None else v_val
+                    all_min.append(vmin_val)
+                    all_max.append(vmax_val)
+
+                min_v = round(min(all_min), 1)
+                max_v = round(max(all_max), 1)
+                dev_min = abs(230.0 - min_v)
+                dev_max = abs(max_v - 230.0)
+                ext_v = max_v if dev_max >= dev_min else min_v
+
+                dur_sec = max(20, int((end_dt - start_dt).total_seconds()) + 20)
+                result.append({
+                    'start_id': start_id,
+                    'start_ts': start_dt,
+                    'end_ts': end_dt,
+                    'duration_sec': dur_sec,
+                    'voltage': ext_v,
+                    'voltage_min': min_v,
+                    'voltage_max': max_v
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get voltage anomalies for {location}: {e}")
+            return []
 
     def get_latest_reading(self, location: str) -> Optional[Dict[str, Any]]:
         """Return the most recent telemetry reading from voltage_readings table"""

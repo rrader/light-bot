@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Callable
 from flask import Blueprint, jsonify, request, Response
 
-from light_bot.config import LOCATIONS, get_location_config, get_group_config, get_actual_group_number
+from light_bot.config import LOCATIONS, get_location_config, get_group_config, get_actual_group_number, TIMEZONE
 from light_bot.formatters.duration_formatter import DurationFormatter
 from light_bot.services.stats_service import StatsService
 
@@ -722,6 +722,54 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
                     except Exception as ve:
                         logger.debug(f"Failed to fetch voltage extrema for event {e.id}: {ve}")
                 result.append(ev_item)
+
+            # Supplement with discrete voltage threshold anomalies (outside 207-253V) for today
+            if stats_service and (location is None or location == 'home'):
+                try:
+                    now_kyiv = datetime.now(TIMEZONE)
+                    today_start = now_kyiv.replace(hour=0, minute=0, second=0, microsecond=0)
+                    anomalies = stats_service.get_voltage_anomalies(
+                        location=location or 'home',
+                        since=today_start,
+                        min_threshold=207.0,
+                        max_threshold=253.0
+                    )
+                    for anom in anomalies:
+                        start_ts = anom['start_ts']
+                        start_str = start_ts.isoformat()
+                        result.append({
+                            'id': f"va_{anom['start_id']}",
+                            'timestamp': start_str,
+                            'status': 'unstable',
+                            'location': location or 'home',
+                            't': start_str,
+                            'on': False,
+                            'voltage': anom['voltage'],
+                            'voltage_min': anom['voltage_min'],
+                            'voltage_max': anom['voltage_max'],
+                            'source': 'voltage_threshold'
+                        })
+                        end_ts = start_ts + timedelta(seconds=anom['duration_sec'])
+                        if end_ts < now_kyiv:
+                            end_str = end_ts.isoformat()
+                            result.append({
+                                'id': f"va_end_{anom['start_id']}",
+                                'timestamp': end_str,
+                                'status': 'on',
+                                'location': location or 'home',
+                                't': end_str,
+                                'on': True,
+                                'voltage': 230.0,
+                                'source': 'ha'
+                            })
+                except Exception as ae:
+                    logger.debug(f"Failed to fetch voltage anomalies: {ae}")
+
+            # Re-sort all events newest first
+            result.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+            if limit:
+                result = result[:limit]
+
             return jsonify(result), 200
         except Exception as e:
             logger.error(f"Error getting public events: {e}")

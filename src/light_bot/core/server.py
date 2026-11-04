@@ -364,7 +364,9 @@ def _handle_power_status_update(
     voltage: Optional[float] = None,
     source: Optional[str] = None,
     before_relay: Optional[bool] = None,
-    after_relay: Optional[bool] = None
+    after_relay: Optional[bool] = None,
+    voltage_min: Optional[float] = None,
+    voltage_max: Optional[float] = None
 ):
     """Internal helper to process power status update for any location."""
     if status not in ['on', 'off', 'unstable']:
@@ -384,7 +386,9 @@ def _handle_power_status_update(
         voltage=voltage,
         before_relay=before_relay,
         after_relay=after_relay,
-        source=source
+        source=source,
+        voltage_min=voltage_min,
+        voltage_max=voltage_max
     )
 
     # Check if status actually changed
@@ -686,6 +690,20 @@ def update_power_status():
         if err:
             return jsonify({'error': err}), 400
 
+        voltage_min = None
+        if 'voltage_min' in data and data['voltage_min'] is not None:
+            try:
+                voltage_min = float(data['voltage_min'])
+            except (ValueError, TypeError):
+                pass
+
+        voltage_max = None
+        if 'voltage_max' in data and data['voltage_max'] is not None:
+            try:
+                voltage_max = float(data['voltage_max'])
+            except (ValueError, TypeError):
+                pass
+
         loc_id = data.get('location')
         is_legacy = (loc_id is None or loc_id.lower() == 'home')
 
@@ -696,7 +714,9 @@ def update_power_status():
             voltage=voltage,
             source=source,
             before_relay=before_relay,
-            after_relay=after_relay
+            after_relay=after_relay,
+            voltage_min=voltage_min,
+            voltage_max=voltage_max
         )
 
     except Exception as e:
@@ -728,6 +748,20 @@ def update_location_power_status(location_id: str):
         if err:
             return jsonify({'error': err}), 400
 
+        voltage_min = None
+        if 'voltage_min' in data and data['voltage_min'] is not None:
+            try:
+                voltage_min = float(data['voltage_min'])
+            except (ValueError, TypeError):
+                pass
+
+        voltage_max = None
+        if 'voltage_max' in data and data['voltage_max'] is not None:
+            try:
+                voltage_max = float(data['voltage_max'])
+            except (ValueError, TypeError):
+                pass
+
         return _handle_power_status_update(
             resolved_status,
             location_id,
@@ -735,7 +769,9 @@ def update_location_power_status(location_id: str):
             voltage=voltage,
             source=source,
             before_relay=before_relay,
-            after_relay=after_relay
+            after_relay=after_relay,
+            voltage_min=voltage_min,
+            voltage_max=voltage_max
         )
 
     except Exception as e:
