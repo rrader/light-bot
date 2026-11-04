@@ -1130,24 +1130,34 @@
             const now = new Date();
             const kyivDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' }); // YYYY-MM-DD
             const todayEvents = [];
+            let lastEventBeforeToday = null;
 
             (eventsList || []).forEach(e => {
                 const rawTs = e.timestamp || e.t;
                 if (!rawTs) return;
                 const d = new Date(rawTs);
                 const eventKyivDate = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' });
+                const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                const parts = kyivTimeStr.split(':');
+                const mins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+                let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
+
+                const parsed = {
+                    date: eventKyivDate,
+                    mins,
+                    status: st,
+                    voltage: e.voltage,
+                    voltage_min: e.voltage_min,
+                    voltage_max: e.voltage_max,
+                    rawDate: d
+                };
+
                 if (eventKyivDate === kyivDateStr) {
-                    const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
-                    const parts = kyivTimeStr.split(':');
-                    const mins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
-                    let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
-                    todayEvents.push({
-                        mins,
-                        status: st,
-                        voltage: e.voltage,
-                        voltage_min: e.voltage_min,
-                        voltage_max: e.voltage_max
-                    });
+                    todayEvents.push(parsed);
+                } else if (eventKyivDate < kyivDateStr) {
+                    if (!lastEventBeforeToday || parsed.rawDate > lastEventBeforeToday.rawDate) {
+                        lastEventBeforeToday = parsed;
+                    }
                 }
             });
 
@@ -1155,18 +1165,25 @@
 
             const intervals = [];
 
+            // Determine status at midnight (00:00):
+            // 1. From the last recorded event prior to today if present
+            // 2. Otherwise inferred from the first event of today
+            // 3. Otherwise steady state of currentStatus
+            let initialStatus = 'on';
+            if (lastEventBeforeToday) {
+                initialStatus = lastEventBeforeToday.status;
+            } else if (todayEvents.length > 0) {
+                const firstEv = todayEvents[0];
+                initialStatus = (firstEv.status === 'on') ? 'off' : 'on';
+            } else {
+                initialStatus = currentStatus;
+            }
+
             if (todayEvents.length === 0) {
                 // Steady state all day
-                intervals.push({ start: 0, end: currentMins, status: currentStatus });
+                intervals.push({ start: 0, end: currentMins, status: initialStatus });
             } else {
                 const firstEv = todayEvents[0];
-                let initialStatus = 'on';
-                if (firstEv.status === 'on') {
-                    initialStatus = 'off';
-                } else if (firstEv.status === 'off' || firstEv.status === 'unstable') {
-                    initialStatus = 'on';
-                }
-
                 if (firstEv.mins > 0) {
                     intervals.push({ start: 0, end: firstEv.mins, status: initialStatus });
                 }
