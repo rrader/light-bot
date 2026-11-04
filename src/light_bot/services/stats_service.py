@@ -261,6 +261,35 @@ class StatsService:
             logger.error(f"Failed to get voltage extrema: {e}")
         return None, None
 
+    def count_events(
+        self,
+        location: str,
+        status: str,
+        since: datetime,
+        until: Optional[datetime] = None
+    ) -> int:
+        """Count power events of a given status for a location within a time window"""
+        try:
+            since_str = since.isoformat()
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                if until:
+                    until_str = until.isoformat()
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM power_events WHERE location = ? AND status = ? AND timestamp >= ? AND timestamp <= ?',
+                        (location, status, since_str, until_str)
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM power_events WHERE location = ? AND status = ? AND timestamp >= ?',
+                        (location, status, since_str)
+                    )
+                row = cursor.fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+        except Exception as e:
+            logger.error(f"Failed to count events for {location}: {e}")
+            return 0
+
     def get_voltage_anomalies(
         self,
         location: str,

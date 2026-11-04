@@ -16,7 +16,8 @@ from light_bot.api.yasno import YasnoScheduleResponse, SlotType, client as yasno
 from light_bot.config import (
     API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS,
     get_location_config, HA_WEBHOOK_URL, UNSTABLE_NOTIFICATION_DELAY_SECONDS,
-    OUTAGE_NOTIFICATION_DELAY_SECONDS
+    OUTAGE_NOTIFICATION_DELAY_SECONDS, UNSTABLE_FREQUENT_THRESHOLD,
+    UNSTABLE_FREQUENT_WINDOW_SECONDS, UNSTABLE_FREQUENT_COOLDOWN_SECONDS
 )
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
@@ -32,7 +33,10 @@ stats_service = StatsService(DB_PATH)
 telegram_bot.set_stats_service(stats_service)
 unstable_alert_manager = UnstableAlertManager(
     delay_seconds=UNSTABLE_NOTIFICATION_DELAY_SECONDS,
-    stats_service=stats_service
+    stats_service=stats_service,
+    frequent_threshold=UNSTABLE_FREQUENT_THRESHOLD,
+    frequent_window_seconds=UNSTABLE_FREQUENT_WINDOW_SECONDS,
+    frequent_cooldown_seconds=UNSTABLE_FREQUENT_COOLDOWN_SECONDS
 )
 outage_alert_manager = OutageAlertManager(
     delay_seconds=OUTAGE_NOTIFICATION_DELAY_SECONDS

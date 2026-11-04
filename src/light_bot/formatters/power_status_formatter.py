@@ -134,3 +134,52 @@ class PowerStatusFormatter:
             message += f"⏱ Попередній стан тривав: <b>{duration_text}</b>"
 
         return message
+
+    @staticmethod
+    def format_frequent_unstable_message(
+        timestamp: datetime,
+        count: int,
+        window_hours: int = 1,
+        location_name: Optional[str] = None,
+        voltage: Optional[float] = None,
+        min_voltage: Optional[float] = None,
+        max_voltage: Optional[float] = None
+    ) -> str:
+        """
+        Format message for when multiple instability cutoffs occur within a short window.
+        """
+        kyiv_time = timestamp.strftime('%d.%m.%Y %H:%M:%S')
+        header = f"🟡 <b>В мережі нестабільна напруга ({location_name})!</b> 🟡" if location_name else "🟡 <b>В мережі нестабільна напруга!</b> 🟡"
+
+        time_window_str = "за останню годину" if window_hours == 1 else f"за останні {window_hours} год"
+
+        # Ukrainian plural for спрацювання (1 спрацювання, 2-4 спрацювання, 5-20 спрацювань)
+        n_abs = abs(count)
+        if 11 <= (n_abs % 100) <= 19:
+            plural_cutoffs = f"{count} спрацювань"
+        elif (n_abs % 10) == 1:
+            plural_cutoffs = f"{count} спрацювання"
+        elif 2 <= (n_abs % 10) <= 4:
+            plural_cutoffs = f"{count} спрацювання"
+        else:
+            plural_cutoffs = f"{count} спрацювань"
+
+        message = (
+            f"{header}\n\n"
+            f"🕐 Час: {kyiv_time}\n"
+        )
+
+        if voltage is not None:
+            if min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 2.0:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b> (діапазон коливань: {min_voltage:.1f}–{max_voltage:.1f} В)\n"
+            else:
+                message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
+        elif min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 2.0:
+            message += f"⚡️ Діапазон коливань напруги: <b>{min_voltage:.1f}–{max_voltage:.1f} В</b>\n"
+
+        message += (
+            f"⚠️ Зафіксовано часті стрибки напруги (<b>{plural_cutoffs} реле</b> {time_window_str}).\n"
+            f"Реле захисту повторно відмикає споживачів через коливання в електромережі."
+        )
+
+        return message
