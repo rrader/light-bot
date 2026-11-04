@@ -1260,6 +1260,23 @@
                 }
             }
 
+            // Treat short 'unstable' segments (<= 90s) directly following 'off' and preceding 'on'
+            // as standard relay power-on delay (part of power-on restoration), NOT as a power instability.
+            for (let i = 0; i < intervals.length; i++) {
+                const cur = intervals[i];
+                if (cur.status === 'unstable') {
+                    const prev = (i > 0) ? intervals[i - 1] : null;
+                    const next = (i + 1 < intervals.length) ? intervals[i + 1] : null;
+                    const prevStatus = prev ? prev.status : initialStatus;
+                    const nextStatus = next ? next.status : currentStatus;
+                    const durSec = cur.durationSec || Math.round((cur.end - cur.start) * 60);
+
+                    if (prevStatus === 'off' && nextStatus === 'on' && durSec <= 90) {
+                        cur.status = 'on';
+                    }
+                }
+            }
+
             // Filter out transient noise/glitches (< 2 minutes) where an 'off' spike immediately reverts
             // NEVER swallow 'unstable' events: user explicitly wants to see every detected instability
             const debounced = [];
