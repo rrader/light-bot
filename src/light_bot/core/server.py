@@ -17,7 +17,8 @@ from light_bot.config import (
     API_TOKEN, WATCHDOG_STATUS_FILE, TIMEZONE, YASNO_GROUP_CONFIGS, DB_PATH, LOCATIONS,
     get_location_config, HA_WEBHOOK_URL, UNSTABLE_NOTIFICATION_DELAY_SECONDS,
     OUTAGE_NOTIFICATION_DELAY_SECONDS, UNSTABLE_FREQUENT_THRESHOLD,
-    UNSTABLE_FREQUENT_WINDOW_SECONDS, UNSTABLE_FREQUENT_COOLDOWN_SECONDS
+    UNSTABLE_FREQUENT_WINDOW_SECONDS, UNSTABLE_FREQUENT_COOLDOWN_SECONDS,
+    UNSTABLE_STABILIZATION_SECONDS
 )
 from light_bot.core.schedule_tools import find_next_outage
 from light_bot.services.stats_service import StatsService
@@ -36,7 +37,8 @@ unstable_alert_manager = UnstableAlertManager(
     stats_service=stats_service,
     frequent_threshold=UNSTABLE_FREQUENT_THRESHOLD,
     frequent_window_seconds=UNSTABLE_FREQUENT_WINDOW_SECONDS,
-    frequent_cooldown_seconds=UNSTABLE_FREQUENT_COOLDOWN_SECONDS
+    frequent_cooldown_seconds=UNSTABLE_FREQUENT_COOLDOWN_SECONDS,
+    stabilization_seconds=UNSTABLE_STABILIZATION_SECONDS
 )
 outage_alert_manager = OutageAlertManager(
     delay_seconds=OUTAGE_NOTIFICATION_DELAY_SECONDS
@@ -528,7 +530,16 @@ def _handle_power_status_update(
                 except Exception as ex:
                     logger.warning(f"Failed to check prior event for {loc.id}: {ex}")
 
-            if was_unstable and not sustained_instability and not prior_was_off:
+            if effective_was_unstable and not prior_was_off:
+                # Treat recovery as confirmed only after a full hour without another trip.
+                unstable_alert_manager.schedule_stabilization_alert(
+                    loc,
+                    voltage=voltage,
+                    min_voltage=min_v,
+                    max_voltage=max_v
+                )
+                message = None
+            elif was_unstable and not sustained_instability and not prior_was_off:
                 # Voltage spike was truly short-lived (< delay_seconds) when power was already ON,
                 # and alert was never sent: suppress Telegram message so user is not spammed.
                 logger.info(
@@ -609,6 +620,7 @@ def _handle_power_status_update(
         else:
             # status == 'off'
             unstable_alert_manager.cancel(loc.id)
+            unstable_alert_manager.cancel_stabilization_alert(loc.id)
             outage_alert_manager.schedule_outage_alert(
                 loc,
                 timestamp=now_ts,

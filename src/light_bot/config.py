@@ -23,10 +23,12 @@ API_TOKEN = os.getenv('API_TOKEN')
 # Unstable Power Alert Configuration
 # Delay in seconds to wait before sending Telegram alert for 'unstable' status (filters short spikes)
 UNSTABLE_NOTIFICATION_DELAY_SECONDS = int(os.getenv('UNSTABLE_NOTIFICATION_DELAY_SECONDS', '180'))
-# Frequent Unstable Alert: if more than this many cutoffs occur within window_seconds, alert even if debounced
+# Frequent Unstable Alert: alert when this many cutoffs occur within window_seconds, even if debounced
 UNSTABLE_FREQUENT_THRESHOLD = int(os.getenv('UNSTABLE_FREQUENT_THRESHOLD', '3'))
 UNSTABLE_FREQUENT_WINDOW_SECONDS = int(os.getenv('UNSTABLE_FREQUENT_WINDOW_SECONDS', '3600'))
 UNSTABLE_FREQUENT_COOLDOWN_SECONDS = int(os.getenv('UNSTABLE_FREQUENT_COOLDOWN_SECONDS', '7200'))
+# Confirm recovery only after this long with no new instability
+UNSTABLE_STABILIZATION_SECONDS = int(os.getenv('UNSTABLE_STABILIZATION_SECONDS', '3600'))
 # Delay in seconds to wait before sending Telegram alert for 'off' status (filters transient sub-minute glitches)
 OUTAGE_NOTIFICATION_DELAY_SECONDS = int(os.getenv('OUTAGE_NOTIFICATION_DELAY_SECONDS', '40'))
 
