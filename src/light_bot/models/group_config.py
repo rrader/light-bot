@@ -25,6 +25,7 @@ class GroupConfig:
     chat_id: Optional[int] = None
     group: Optional[str] = None
     group_dynamic: Optional[str] = None
+    provider: Optional[str] = None
 
     def __post_init__(self):
         """Validate configuration after initialization"""
@@ -32,6 +33,12 @@ class GroupConfig:
             raise ValueError("id cannot be empty")
         if not self.city:
             raise ValueError("city cannot be empty")
+
+        if not self.provider:
+            if self.city.lower() in ("vinnytsia", "voe"):
+                self.provider = "voe"
+            else:
+                self.provider = "yasno"
         
         # Validate that either group or group_dynamic is specified (but not both)
         if self.group and self.group_dynamic:

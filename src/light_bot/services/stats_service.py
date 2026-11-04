@@ -1,16 +1,16 @@
 import sqlite3
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple, Any
 from light_bot.models.power_event import PowerEvent
 from light_bot.models.schedule_history import ScheduleHistory
-from light_bot.config import TIMEZONE
+from light_bot.config import TIMEZONE, DB_PATH
 
 logger = logging.getLogger(__name__)
 
 class StatsService:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = db_path or DB_PATH
         self._init_db()
 
     def _get_conn(self):
@@ -25,9 +25,54 @@ class StatsService:
                     CREATE TABLE IF NOT EXISTS power_events (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
-                        status TEXT NOT NULL
+                        status TEXT NOT NULL,
+                        location TEXT DEFAULT 'home',
+                        voltage REAL,
+                        source TEXT,
+                        before_relay INTEGER,
+                        after_relay INTEGER
                     )
                 ''')
+                # Migrate existing table if columns are missing
+                for col_name, col_type in [
+                    ("location", "TEXT DEFAULT 'home'"),
+                    ("voltage", "REAL"),
+                    ("source", "TEXT"),
+                    ("before_relay", "INTEGER"),
+                    ("after_relay", "INTEGER"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE power_events ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS voltage_readings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        location TEXT NOT NULL,
+                        voltage REAL,
+                        before_relay INTEGER,
+                        after_relay INTEGER,
+                        source TEXT,
+                        voltage_min REAL,
+                        voltage_max REAL
+                    )
+                ''')
+                # Migrate voltage_readings table if columns are missing
+                for col_name, col_type in [
+                    ("voltage_min", "REAL"),
+                    ("voltage_max", "REAL"),
+                ]:
+                    try:
+                        cursor.execute(f"ALTER TABLE voltage_readings ADD COLUMN {col_name} {col_type}")
+                    except sqlite3.OperationalError:
+                        pass
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_voltage_readings_loc_ts 
+                    ON voltage_readings(location, timestamp)
+                ''')
+
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS schedule_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,9 +81,44 @@ class StatsService:
                         timestamp TEXT NOT NULL
                     )
                 ''')
+
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS bot_channel_buttons (
+                        chat_id TEXT PRIMARY KEY,
+                        message_id INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+
+    def get_last_button_message_id(self, chat_id: str | int) -> Optional[int]:
+        """Get the message_id that currently has the active WebApp button for chat_id"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT message_id FROM bot_channel_buttons WHERE chat_id = ?', (str(chat_id),))
+                row = cursor.fetchone()
+                return int(row[0]) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get last button message id for {chat_id}: {e}")
+            return None
+
+    def set_last_button_message_id(self, chat_id: str | int, message_id: int):
+        """Update or insert the message_id having the active WebApp button"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''INSERT INTO bot_channel_buttons (chat_id, message_id, updated_at)
+                       VALUES (?, ?, ?)
+                       ON CONFLICT(chat_id) DO UPDATE SET message_id = excluded.message_id, updated_at = excluded.updated_at''',
+                    (str(chat_id), message_id, datetime.now(TIMEZONE).isoformat())
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to set last button message id for {chat_id}: {e}")
 
     def record_schedule_history(self, group_id: str, schedule_text: str, timestamp: datetime):
         """Record a schedule history event"""
@@ -87,32 +167,266 @@ class StatsService:
             logger.error(f"Failed to get schedule history for group {group_id}: {e}")
             return []
 
-    def record_event(self, status: str, timestamp: datetime):
+    def record_event(
+        self,
+        status: str,
+        timestamp: datetime,
+        location: str = 'home',
+        voltage: Optional[float] = None,
+        source: Optional[str] = None,
+        before_relay: Optional[bool] = None,
+        after_relay: Optional[bool] = None
+    ):
         """Record a power event"""
         try:
             # Ensure timestamp is ISO format string
             timestamp_str = timestamp.isoformat()
+            before_int = None if before_relay is None else (1 if before_relay else 0)
+            after_int = None if after_relay is None else (1 if after_relay else 0)
             
             with self._get_conn() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'INSERT INTO power_events (timestamp, status) VALUES (?, ?)',
-                    (timestamp_str, status)
+                    '''INSERT INTO power_events 
+                       (timestamp, status, location, voltage, source, before_relay, after_relay) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (timestamp_str, status, location, voltage, source, before_int, after_int)
                 )
                 conn.commit()
-                logger.info(f"Recorded power event: {status} at {timestamp_str}")
+                logger.info(
+                    f"Recorded power event: {status} at {timestamp_str} "
+                    f"(location: {location}, voltage: {voltage}, source: {source}, "
+                    f"before_relay: {before_relay}, after_relay: {after_relay})"
+                )
         except Exception as e:
             logger.error(f"Failed to record power event: {e}")
 
-    def get_recent_events(self, limit: int = 10) -> List[PowerEvent]:
-        """Get recent power events"""
+    def record_reading(
+        self,
+        timestamp: datetime,
+        location: str = 'home',
+        voltage: Optional[float] = None,
+        before_relay: Optional[bool] = None,
+        after_relay: Optional[bool] = None,
+        source: Optional[str] = None,
+        voltage_min: Optional[float] = None,
+        voltage_max: Optional[float] = None
+    ):
+        """Record a telemetry/voltage reading to voltage_readings table"""
+        try:
+            timestamp_str = timestamp.isoformat()
+            before_int = None if before_relay is None else (1 if before_relay else 0)
+            after_int = None if after_relay is None else (1 if after_relay else 0)
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''INSERT INTO voltage_readings 
+                       (timestamp, location, voltage, before_relay, after_relay, source, voltage_min, voltage_max) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (timestamp_str, location, voltage, before_int, after_int, source, voltage_min, voltage_max)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to record voltage reading: {e}")
+
+    def get_voltage_extrema(
+        self,
+        location: str,
+        since: datetime,
+        until: Optional[datetime] = None
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Return (min_voltage, max_voltage) for a location in the given time window, ignoring 0.0V"""
+        try:
+            since_str = since.isoformat()
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                if until:
+                    until_str = until.isoformat()
+                    cursor.execute(
+                        '''SELECT MIN(voltage), MAX(voltage) FROM voltage_readings 
+                           WHERE location = ? AND timestamp >= ? AND timestamp <= ? AND voltage IS NOT NULL AND voltage > 0''',
+                        (location, since_str, until_str)
+                    )
+                else:
+                    cursor.execute(
+                        '''SELECT MIN(voltage), MAX(voltage) FROM voltage_readings 
+                           WHERE location = ? AND timestamp >= ? AND voltage IS NOT NULL AND voltage > 0''',
+                        (location, since_str)
+                    )
+                row = cursor.fetchone()
+                if row and row[0] is not None and row[1] is not None:
+                    return float(row[0]), float(row[1])
+        except Exception as e:
+            logger.error(f"Failed to get voltage extrema: {e}")
+        return None, None
+
+    def count_events(
+        self,
+        location: str,
+        status: str,
+        since: datetime,
+        until: Optional[datetime] = None
+    ) -> int:
+        """Count power events of a given status for a location within a time window"""
+        try:
+            since_str = since.isoformat()
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                if until:
+                    until_str = until.isoformat()
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM power_events WHERE location = ? AND status = ? AND timestamp >= ? AND timestamp <= ?',
+                        (location, status, since_str, until_str)
+                    )
+                else:
+                    cursor.execute(
+                        'SELECT COUNT(*) FROM power_events WHERE location = ? AND status = ? AND timestamp >= ?',
+                        (location, status, since_str)
+                    )
+                row = cursor.fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+        except Exception as e:
+            logger.error(f"Failed to count events for {location}: {e}")
+            return 0
+
+    def get_voltage_anomalies(
+        self,
+        location: str,
+        since: datetime,
+        until: Optional[datetime] = None,
+        min_threshold: float = 207.0,
+        max_threshold: float = 253.0
+    ) -> List[Dict[str, Any]]:
+        """
+        Find contiguous time windows in voltage_readings where voltage was outside [min_threshold, max_threshold]
+        while grid power was present (before_relay=1, after_relay=1, voltage >= 160V to exclude line disconnects).
+        """
+        try:
+            since_str = since.isoformat()
+            query = '''
+                SELECT id, timestamp, voltage, voltage_min, voltage_max, before_relay, after_relay
+                FROM voltage_readings
+                WHERE location = ? AND timestamp >= ? AND voltage IS NOT NULL AND voltage > 0
+            '''
+            params = [location, since_str]
+            if until:
+                query += ' AND timestamp <= ?'
+                params.append(until.isoformat())
+            query += ' ORDER BY id'
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, tuple(params))
+                rows = cursor.fetchall()
+
+            anomalies = []
+            current_group = []
+
+            for r in rows:
+                rid = r[0]
+                ts_str = r[1]
+                v = r[2]
+                br = r[5]
+                ar = r[6]
+                # Voltage instability: 160 <= v < min_threshold OR v > max_threshold, while power supplied (br=1, ar=1)
+                is_anom = (br == 1 and ar == 1 and ((v >= 160.0 and v < min_threshold) or v > max_threshold))
+                if is_anom:
+                    current_group.append(r)
+                else:
+                    if current_group:
+                        anomalies.append(current_group)
+                        current_group = []
+            if current_group:
+                anomalies.append(current_group)
+
+            result = []
+            for anom in anomalies:
+                start_id = anom[0][0]
+                start_ts_str = anom[0][1]
+                end_ts_str = anom[-1][1]
+                try:
+                    start_dt = datetime.fromisoformat(start_ts_str)
+                except Exception:
+                    continue
+                try:
+                    end_dt = datetime.fromisoformat(end_ts_str)
+                except Exception:
+                    end_dt = start_dt
+
+                all_min = []
+                all_max = []
+                for x in anom:
+                    v_val = float(x[2])
+                    vmin_val = float(x[3]) if len(x) > 3 and x[3] is not None else v_val
+                    vmax_val = float(x[4]) if len(x) > 4 and x[4] is not None else v_val
+                    all_min.append(vmin_val)
+                    all_max.append(vmax_val)
+
+                min_v = round(min(all_min), 1)
+                max_v = round(max(all_max), 1)
+                dev_min = abs(230.0 - min_v)
+                dev_max = abs(max_v - 230.0)
+                ext_v = max_v if dev_max >= dev_min else min_v
+
+                dur_sec = max(20, int((end_dt - start_dt).total_seconds()) + 20)
+                result.append({
+                    'start_id': start_id,
+                    'start_ts': start_dt,
+                    'end_ts': end_dt,
+                    'duration_sec': dur_sec,
+                    'voltage': ext_v,
+                    'voltage_min': min_v,
+                    'voltage_max': max_v
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get voltage anomalies for {location}: {e}")
+            return []
+
+    def get_latest_reading(self, location: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent telemetry reading from voltage_readings table"""
         try:
             with self._get_conn() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    'SELECT id, timestamp, status FROM power_events ORDER BY timestamp DESC LIMIT ?',
-                    (limit,)
+                    '''SELECT timestamp, voltage, source, before_relay, after_relay
+                       FROM voltage_readings
+                       WHERE location = ?
+                       ORDER BY id DESC LIMIT 1''',
+                    (location,)
                 )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'timestamp': row[0],
+                        'voltage': row[1],
+                        'source': row[2],
+                        'before_relay': bool(row[3]) if row[3] is not None else None,
+                        'after_relay': bool(row[4]) if row[4] is not None else None,
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Error getting latest reading for {location}: {e}")
+            return None
+
+    def get_recent_events(self, limit: int = 10, location: Optional[str] = None) -> List[PowerEvent]:
+        """Get recent power events, optionally filtered by location"""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                if location:
+                    cursor.execute(
+                        '''SELECT id, timestamp, status, location, voltage, source, before_relay, after_relay 
+                           FROM power_events WHERE location = ? ORDER BY timestamp DESC LIMIT ?''',
+                        (location, limit)
+                    )
+                else:
+                    cursor.execute(
+                        '''SELECT id, timestamp, status, location, voltage, source, before_relay, after_relay 
+                           FROM power_events ORDER BY timestamp DESC LIMIT ?''',
+                        (limit,)
+                    )
                 rows = cursor.fetchall()
                 
                 events = []
@@ -123,10 +437,21 @@ class StatsService:
                         if timestamp.tzinfo is None:
                             timestamp = TIMEZONE.localize(timestamp)
                         
+                        loc = row[3] if len(row) > 3 and row[3] else 'home'
+                        volt = row[4] if len(row) > 4 and row[4] is not None else None
+                        src = row[5] if len(row) > 5 and row[5] is not None else None
+                        b_rel = bool(row[6]) if len(row) > 6 and row[6] is not None else None
+                        a_rel = bool(row[7]) if len(row) > 7 and row[7] is not None else None
+
                         events.append(PowerEvent(
                             id=row[0],
                             timestamp=timestamp,
-                            status=row[2]
+                            status=row[2],
+                            location=loc,
+                            voltage=volt,
+                            source=src,
+                            before_relay=b_rel,
+                            after_relay=a_rel
                         ))
                     except ValueError:
                         continue

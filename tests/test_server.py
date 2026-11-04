@@ -136,6 +136,75 @@ class TestPowerStatusEndpoint:
 
             assert response.status_code == 200
 
+    def test_stabilization_sent_when_unstable_was_sustained_across_restart(self, client, temp_power_file):
+        """Test that voltage stabilization message is sent when previous state was unstable for >= 180s"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+
+        # Simulate existing file on disk where instability started 30 mins ago
+        past_time = (datetime.now(TIMEZONE) - timedelta(minutes=30)).isoformat()
+        with open(temp_power_file, 'w') as f:
+            f.write("unstable\n")
+            f.write(f"Last updated: {past_time}\n")
+            f.write("Voltage: 275.0\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot.send_message', new_callable=AsyncMock) as mock_send:
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'Bearer test_api_token_123'},
+                                   json={'status': 'on', 'voltage': 225.0})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status_changed'] is True
+            assert data['notification_sent'] is True
+            assert mock_send.called
+            sent_msg = mock_send.call_args[0][0]
+            assert "стабілізувалась" in sent_msg
+
+    def test_power_on_sent_after_brief_unstable_following_outage(self, client, temp_power_file):
+        """Test that power ON message is sent when unstable was a brief relay delay after an outage"""
+        from datetime import datetime, timedelta
+        from light_bot.config import TIMEZONE
+        from light_bot.core.server import stats_service
+
+        with stats_service._get_conn() as conn:
+            conn.execute("DELETE FROM power_events WHERE location = 'home'")
+
+        now = datetime.now(TIMEZONE)
+        ten_mins_ago = now - timedelta(minutes=10)
+        twenty_secs_ago = now - timedelta(seconds=20)
+
+        # Record 'off' in DB as prior event
+        stats_service.record_event(
+            status='off',
+            timestamp=ten_mins_ago,
+            location='home',
+            voltage=0.0
+        )
+
+        # Set status file to unstable (20s ago, simulating relay waiting delay)
+        with open(temp_power_file, 'w') as f:
+            f.write("unstable\n")
+            f.write(f"Last updated: {twenty_secs_ago.isoformat()}\n")
+            f.write("Voltage: 248.0\n")
+
+        with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.telegram_bot.send_message', new_callable=AsyncMock) as mock_send:
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'Bearer test_api_token_123'},
+                                   json={'status': 'on', 'voltage': 247.0})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status_changed'] is True
+            assert data['notification_sent'] is True
+            assert mock_send.called
+            sent_msg = mock_send.call_args[0][0]
+            assert "Світло з'явилось" in sent_msg
+
     def test_get_power_status_no_auth(self, client):
         """Test get status without authentication returns 401"""
         response = client.get('/power-status')
@@ -442,3 +511,145 @@ class TestDurationTracking:
             # Should succeed without crashing
             assert response.status_code == 200
             assert response.json['status_changed'] is True
+
+
+class TestMultiLocationEndpoints:
+    """Tests for multi-location power status endpoints"""
+
+    def test_update_power_status_by_path_param(self, client, temp_power_file):
+        """Test POST /power-status/<location_id> updates the specific location"""
+        with patch('light_bot.config.LOCATIONS') as mock_locs, \
+             patch('light_bot.core.server.LOCATIONS', mock_locs), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            from light_bot.models import LocationConfig
+            vn_loc = LocationConfig(
+                id='vinnytsia',
+                name='Вінниця',
+                status_file=temp_power_file,
+                channel_id='@test_channel_vn',
+                yasno_group=None
+            )
+            mock_locs.get.side_effect = lambda k: vn_loc if k == 'vinnytsia' else None
+            mock_locs.values.return_value = [vn_loc]
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status/vinnytsia',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'on'})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status'] == 'success'
+            assert data['power_status'] == 'on'
+            assert data['location'] == 'vinnytsia'
+            assert data['status_changed'] is True
+            assert data['notification_sent'] is True
+
+            # Verify file was written
+            with open(temp_power_file, 'r') as f:
+                content = f.read()
+                assert 'on' in content
+
+            # Verify message formatted with location name
+            assert mock_bot.send_message.called
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            assert "Світло з'явилось (Вінниця)!" in message
+            # Verify sent to vinnytsia channel
+            assert call_args[1].get('chat_id') == '@test_channel_vn'
+
+    def test_update_power_status_with_location_in_body(self, client, temp_power_file):
+        """Test POST /power-status with 'location' in JSON body"""
+        with patch('light_bot.config.LOCATIONS') as mock_locs, \
+             patch('light_bot.core.server.LOCATIONS', mock_locs), \
+             patch('light_bot.core.server.telegram_bot') as mock_bot:
+
+            from light_bot.models import LocationConfig
+            vn_loc = LocationConfig(
+                id='vinnytsia',
+                name='Вінниця',
+                status_file=temp_power_file,
+                channel_id=None,
+                yasno_group=None
+            )
+            mock_locs.get.side_effect = lambda k: vn_loc if k == 'vinnytsia' else None
+            mock_bot.send_message = AsyncMock(return_value=True)
+
+            response = client.post('/power-status',
+                                   headers={'Authorization': 'test_api_token_123'},
+                                   json={'status': 'off', 'location': 'vinnytsia'})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['status'] == 'success'
+            assert data['power_status'] == 'off'
+            assert data['location'] == 'vinnytsia'
+
+            assert mock_bot.send_message.called
+            call_args = mock_bot.send_message.call_args
+            message = call_args[0][0] if call_args[0] else call_args[1].get('message', '')
+            assert "Світло зникло (Вінниця)" in message
+
+    def test_update_power_status_unknown_location(self, client):
+        """Test 404 returned for unknown location"""
+        response = client.post('/power-status/nonexistent_place',
+                               headers={'Authorization': 'test_api_token_123'},
+                               json={'status': 'on'})
+        assert response.status_code == 404
+        assert 'Unknown location' in json.loads(response.data)['error']
+
+    def test_get_power_status_by_location(self, client, temp_power_file):
+        """Test GET /power-status/<location_id>"""
+        with open(temp_power_file, 'w') as f:
+            f.write("on\nLast updated: 2026-10-05T12:00:00+03:00\n")
+
+        with patch('light_bot.config.LOCATIONS') as mock_locs, \
+             patch('light_bot.core.server.LOCATIONS', mock_locs):
+
+            from light_bot.models import LocationConfig
+            vn_loc = LocationConfig(
+                id='vinnytsia',
+                name='Вінниця',
+                status_file=temp_power_file,
+                channel_id=None,
+                yasno_group=None
+            )
+            mock_locs.get.side_effect = lambda k: vn_loc if k == 'vinnytsia' else None
+
+            response = client.get('/power-status/vinnytsia',
+                                  headers={'Authorization': 'test_api_token_123'})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data['location'] == 'vinnytsia'
+            assert data['name'] == 'Вінниця'
+            assert data['status'] == 'on'
+            assert '2026-10-05' in data['last_updated']
+
+    def test_get_power_status_unknown_location(self, client):
+        """Test GET /power-status/<location_id> with nonexistent location returns 404"""
+        response = client.get('/power-status/unknown_place',
+                              headers={'Authorization': 'test_api_token_123'})
+        assert response.status_code == 404
+
+    def test_list_locations_endpoint(self, client, temp_power_file):
+        """Test GET /locations returns list of all configured locations"""
+        with patch('light_bot.config.LOCATIONS') as mock_locs, \
+             patch('light_bot.core.server.LOCATIONS', mock_locs):
+
+            from light_bot.models import LocationConfig
+            loc1 = LocationConfig(id='home', name='Дім', status_file=temp_power_file, channel_id=None, yasno_group='home')
+            loc2 = LocationConfig(id='vinnytsia', name='Вінниця', status_file=temp_power_file, channel_id=None, yasno_group=None)
+            mock_locs.values.return_value = [loc1, loc2]
+
+            response = client.get('/locations',
+                                  headers={'Authorization': 'test_api_token_123'})
+
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert 'locations' in data
+            assert len(data['locations']) == 2
+            ids = [l['id'] for l in data['locations']]
+            assert 'home' in ids
+            assert 'vinnytsia' in ids

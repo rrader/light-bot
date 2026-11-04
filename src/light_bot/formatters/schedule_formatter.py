@@ -3,7 +3,8 @@ from typing import List, Optional
 
 from light_bot.api.yasno import YasnoScheduleResponse, PowerSlot, SlotType
 from light_bot.config import TIMEZONE
-from light_bot.core.schedule_tools import get_outage_slots
+from light_bot.core.schedule_tools import get_outage_slots, _get_group_schedule
+from light_bot.formatters.duration_formatter import DurationFormatter
 
 
 class ScheduleFormatter:
@@ -17,8 +18,20 @@ class ScheduleFormatter:
         return f"{hours:02d}:{mins:02d}"
 
     @staticmethod
+    def format_total_outage_time(minutes: int) -> str:
+        """Format total outage minutes into Ukrainian hours and minutes"""
+        hours = minutes // 60
+        mins = minutes % 60
+        parts = []
+        if hours > 0:
+            parts.append(DurationFormatter._pluralize_hours(hours))
+        if mins > 0:
+            parts.append(DurationFormatter._pluralize_minutes(mins))
+        return " ".join(parts) if parts else "0 годин"
+
+    @staticmethod
     def format_outage_slots(slots: List[PowerSlot]) -> str:
-        """Format outage slots into readable time ranges"""
+        """Format outage slots into readable time ranges and total duration"""
         outage_slots = get_outage_slots(slots)
 
         if not outage_slots:
@@ -30,6 +43,10 @@ class ScheduleFormatter:
             end_str = ScheduleFormatter.minutes_to_time(slot.end)
             formatted.append(f"⚡️ {start_str} - {end_str}")
 
+        total_minutes = sum(slot.end - slot.start for slot in outage_slots)
+        total_time_str = ScheduleFormatter.format_total_outage_time(total_minutes)
+        formatted.append(f"\n⌛️ Всього без світла: <b>{total_time_str}</b>")
+
         return "\n".join(formatted)
 
     @staticmethod
@@ -37,17 +54,28 @@ class ScheduleFormatter:
         """Format city name for display in Ukrainian
 
         Args:
-            city: City name in English (e.g., "kiev", "dnipro")
+            city: City name in English (e.g., "kiev", "dnipro", "vinnytsia")
 
         Returns:
-            City name in Ukrainian (e.g., "Київ", "Дніпро")
+            City name in Ukrainian (e.g., "Київ", "Дніпро", "Вінниця")
         """
         city_map = {
             "kiev": "Київ",
             "kyiv": "Київ",
             "dnipro": "Дніпро",
+            "vinnytsia": "Вінниця",
+            "voe": "Вінниця",
         }
         return city_map.get(city.lower(), city.capitalize())
+
+    @staticmethod
+    def _get_bot_footer(channel: Optional[str] = None, city: str = "kiev") -> str:
+        """Get footer bot handle based on channel or city"""
+        if channel and str(channel).startswith("@"):
+            return f"🤖 {channel}"
+        if city.lower() in ("vinnytsia", "voe"):
+            return "🤖 @vinnytsia_kalichanska_4"
+        return "🤖 @power_po2"
 
     @staticmethod
     def format_schedule_message(
@@ -56,17 +84,19 @@ class ScheduleFormatter:
         city: str = "kiev",
         for_tomorrow: bool = False,
         change_detected: bool = False,
-        change_explanation: Optional[str] = None
+        change_explanation: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> str:
         """Format complete schedule message for Telegram
 
         Args:
             schedule_data: Schedule data from API
             group: Power group number
-            city: City name (e.g., "kiev", "lviv")
+            city: City name (e.g., "kiev", "lviv", "vinnytsia")
             for_tomorrow: Whether this is tomorrow's schedule
             change_detected: Whether this is a change notification
             change_explanation: Optional AI-generated explanation of changes
+            channel: Optional Telegram channel username
         """
         if not schedule_data:
             return "❌ Графік відключень наразі недоступний"
@@ -74,7 +104,7 @@ class ScheduleFormatter:
         # Determine day context
         day_word = "завтра" if for_tomorrow else "сьогодні"
 
-        group_schedule = schedule_data.get_group(group)
+        group_schedule = _get_group_schedule(schedule_data, group, city=city)
         if not group_schedule:
             return f"❌ Група {group} не знайдена в графіку"
 
@@ -86,6 +116,7 @@ class ScheduleFormatter:
 
         # Format city name
         city_name = ScheduleFormatter._format_city_name(city)
+        footer = ScheduleFormatter._get_bot_footer(channel, city)
 
         # Handle emergency shutdowns
         if day_schedule.status == "EmergencyShutdowns":
@@ -95,7 +126,7 @@ class ScheduleFormatter:
                 f"📅 {weekday}, {date_str}\n\n"
                 f"⚠️ <b>Графіки не застосовуються</b>\n\n"
                 f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
-                f"🤖 @power_po2"
+                f"{footer}"
             )
             return message
 
@@ -136,7 +167,7 @@ class ScheduleFormatter:
             f"<b>Планові відключення:</b>\n"
             f"{outages_text}\n\n"
             f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
-            f"🤖 @power_po2"
+            f"{footer}"
         )
 
         return message
@@ -146,12 +177,14 @@ class ScheduleFormatter:
         outage_start: datetime,
         outage_end: datetime,
         group: str,
-        city: str = "kiev"
+        city: str = "kiev",
+        channel: Optional[str] = None,
     ) -> str:
         """Format outage warning message for Telegram"""
         start_str = outage_start.strftime('%H:%M')
         end_str = outage_end.strftime('%H:%M')
         city_name = ScheduleFormatter._format_city_name(city)
+        footer = ScheduleFormatter._get_bot_footer(channel, city)
 
         # Always show "30 minutes" for consistency (warning is sent at 30±5 min window)
         now = datetime.now(TIMEZONE)
@@ -163,7 +196,7 @@ class ScheduleFormatter:
             f"<b>Заплановане включення:</b> {end_str}\n\n"
             f"⚡️ З обережністю користуйтесь ліфтами та зарядіть пристрої\n\n"
             f"🕐 Надіслано: {now.strftime('%H:%M:%S')}\n\n"
-            f"🤖 @power_po2"
+            f"{footer}"
         )
 
         return message

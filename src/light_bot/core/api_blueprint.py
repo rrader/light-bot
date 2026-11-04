@@ -1,0 +1,871 @@
+import json
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, Callable
+from flask import Blueprint, jsonify, request, Response
+
+from light_bot.config import LOCATIONS, get_location_config, get_group_config, get_actual_group_number, TIMEZONE
+from light_bot.formatters.duration_formatter import DurationFormatter
+from light_bot.services.stats_service import StatsService
+
+logger = logging.getLogger(__name__)
+
+SWAGGER_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Light Bot API - Interactive Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar { display: none; }
+    .swagger-ui .info { margin: 30px 0; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function() {
+      SwaggerUIBundle({
+        url: "/api/openapi.json",
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>
+"""
+
+LLMS_TXT = """# Light Bot Public API
+> Machine-readable documentation and discovery guide for AI agents and developer integrations.
+
+## Overview
+Light Bot tracks electrical grid availability (power on/off), outage durations, historical events, and official planned outage schedules for Kyiv (Yasno DSO 902, group 2.1) and Vinnytsia (VOE).
+
+- Base URL: https://light.rmn.pp.ua
+- Interactive Swagger UI: https://light.rmn.pp.ua/api/docs
+- OpenAPI 3.1 Spec: https://light.rmn.pp.ua/api/openapi.json
+- CORS: Enabled with Access-Control-Allow-Origin: https://po2.kyiv.ua (and * for standard GET requests)
+- Authentication: All GET endpoints under /api/ are public and require NO token. Mutation endpoints (POST) require Bearer token.
+
+## Endpoints
+
+### 1. Power Status (Поточний стан)
+- `GET /api/power-status`: Current power state for default location (Kyiv / home).
+- `GET /api/power-status/{location_id}`: Current power state for specific location (`home`, `vinnytsia`).
+- `GET /api/locations`: List of all monitored locations with status and timestamps.
+
+Response structure:
+```json
+{
+  "location": "home",
+  "name": "Київ (Дім)",
+  "status": "on",
+  "last_updated": "Last updated: 2026-10-23T19:00:00+03:00",
+  "timestamp": "2026-10-23T19:00:00+03:00",
+  "yasno_group": "home"
+}
+```
+
+### 2. Events & Outage History (Історія подій)
+- `GET /api/events?limit=50&location=home`: Recent power state transition events (on/off).
+- `GET /api/history?days=30`: Daily aggregated outage count and duration in seconds.
+- `GET /api/stats`: Overall outage summary statistics (uptime percentage, average duration).
+
+Response structure (`/api/events`):
+```json
+[
+  {
+    "id": 120,
+    "location": "home",
+    "status": "on",
+    "timestamp": "2026-10-23T16:30:00+03:00"
+  }
+]
+```
+
+### 3. Outage Schedule (Графік)
+- `GET /api/schedule/{group_id}`: Latest parsed outage schedule for today and tomorrow (`home` for Kyiv group 2.1, `vinnytsia` for Vinnytsia).
+- `GET /api/schedule-history/{group_id}?limit=10`: Historical log of schedule announcements and changes.
+
+Response structure (`/api/schedule/home`):
+```json
+{
+  "group_id": "home",
+  "timestamp": "2026-10-23T16:04:42+03:00",
+  "schedule": {
+    "today": {
+      "date": "2026-10-23T00:00:00+03:00",
+      "status": "EmergencyShutdowns",
+      "slots": []
+    },
+    "tomorrow": {
+      "date": "2026-10-24T00:00:00+03:00",
+      "status": "EmergencyShutdowns",
+      "slots": []
+    },
+    "updatedOn": "2026-10-23T11:18:02Z"
+  }
+}
+```
+"""
+
+OPENAPI_SPEC = {
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Light Bot API",
+        "version": "1.0.0",
+        "description": "Public API for power status monitoring, historical outage events, and planned outage schedules for Kyiv and Vinnytsia."
+    },
+    "servers": [
+        {
+            "url": "https://light.rmn.pp.ua",
+            "description": "Production server"
+        }
+    ],
+    "paths": {
+        "/api": {
+            "get": {
+                "summary": "API Root Directory",
+                "description": "Returns metadata, documentation links, and available endpoints.",
+                "responses": {
+                    "200": {
+                        "description": "API metadata",
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/docs": {
+            "get": {
+                "summary": "Interactive Swagger UI Documentation",
+                "responses": {
+                    "200": {
+                        "description": "Swagger UI HTML page",
+                        "content": {
+                            "text/html": {}
+                        }
+                    }
+                }
+            }
+        },
+        "/api/openapi.json": {
+            "get": {
+                "summary": "OpenAPI Specification",
+                "responses": {
+                    "200": {
+                        "description": "OpenAPI 3.1.0 JSON Schema",
+                        "content": {
+                            "application/json": {}
+                        }
+                    }
+                }
+            }
+        },
+        "/api/llms.txt": {
+            "get": {
+                "summary": "LLM Agent Discovery Document",
+                "responses": {
+                    "200": {
+                        "description": "Plain-text markdown guide for LLMs",
+                        "content": {
+                            "text/plain": {}
+                        }
+                    }
+                }
+            }
+        },
+        "/api/power-status": {
+            "get": {
+                "summary": "Get Default Power Status (Kyiv / Home)",
+                "description": "Returns real-time power availability status for default location (Kyiv / Home). No authentication required.",
+                "responses": {
+                    "200": {
+                        "description": "Current power status",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/PowerStatus"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/power-status/{location_id}": {
+            "get": {
+                "summary": "Get Power Status for Location",
+                "description": "Returns power status for specified location ('home' or 'vinnytsia'). No authentication required.",
+                "parameters": [
+                    {
+                        "name": "location_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "example": "home"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Current power status",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/PowerStatus"}
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown location"
+                    }
+                }
+            }
+        },
+        "/api/locations": {
+            "get": {
+                "summary": "List All Monitored Locations",
+                "description": "Returns all configured locations with their current power status.",
+                "responses": {
+                    "200": {
+                        "description": "List of locations",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "locations": {
+                                            "type": "array",
+                                            "items": {"$ref": "#/components/schemas/PowerStatus"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/events": {
+            "get": {
+                "summary": "Get Recent Power Events",
+                "description": "Returns chronological log of power on/off transitions.",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer", "default": 50, "maximum": 200},
+                        "description": "Maximum number of events to return"
+                    },
+                    {
+                        "name": "location",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"},
+                        "description": "Filter by location ID (e.g. 'home' or 'vinnytsia')"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of power events",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/PowerEvent"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/history": {
+            "get": {
+                "summary": "Get Daily Outage History",
+                "description": "Returns aggregated daily statistics (outage count and outage duration in seconds).",
+                "parameters": [
+                    {
+                        "name": "days",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer", "default": 30, "maximum": 365},
+                        "description": "Number of days of history"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daily outage statistics",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/DailyHistory"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/stats": {
+            "get": {
+                "summary": "Get Summary Outage Statistics",
+                "description": "Returns overall power availability, total outage count, total outage duration, and percentage.",
+                "parameters": [
+                    {
+                        "name": "group_id",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "string"},
+                        "description": "Optional group ID filter"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Statistical summary",
+                        "content": {
+                            "application/json": {
+                                "schema": {"type": "object"}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/schedule/{group_id}": {
+            "get": {
+                "summary": "Get Latest Parsed Outage Schedule",
+                "description": "Returns the latest published power outage schedule for the given group (e.g. 'home', 'vinnytsia') with parsed slot objects.",
+                "parameters": [
+                    {
+                        "name": "group_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "example": "home"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Latest schedule with slots",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/ParsedSchedule"}
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No schedule found for group"
+                    }
+                }
+            }
+        },
+        "/api/schedule-history/{group_id}": {
+            "get": {
+                "summary": "Get Schedule History Entries",
+                "description": "Returns historical log of schedule updates as recorded from Yasno/VOE.",
+                "parameters": [
+                    {
+                        "name": "group_id",
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                        "example": "home"
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": False,
+                        "schema": {"type": "integer", "default": 10, "maximum": 100}
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of schedule history records",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {"$ref": "#/components/schemas/ScheduleHistoryEntry"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "PowerStatus": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "example": "home"},
+                    "location": {"type": "string", "example": "home"},
+                    "name": {"type": "string", "example": "Київ (Дім)"},
+                    "status": {"type": "string", "enum": ["on", "off", "Unknown"], "example": "on"},
+                    "last_updated": {"type": "string", "example": "Last updated: 2026-10-23T19:00:00+03:00"},
+                    "timestamp": {"type": "string", "format": "date-time", "nullable": True},
+                    "yasno_group": {"type": "string", "example": "home"}
+                }
+            },
+            "PowerEvent": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "example": 120},
+                    "timestamp": {"type": "string", "format": "date-time"},
+                    "status": {"type": "string", "enum": ["on", "off"]},
+                    "location": {"type": "string", "example": "home"}
+                }
+            },
+            "DailyHistory": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "example": "2026-10-23"},
+                    "count": {"type": "integer", "example": 2},
+                    "duration_seconds": {"type": "integer", "example": 14400}
+                }
+            },
+            "ParsedSchedule": {
+                "type": "object",
+                "properties": {
+                    "group_id": {"type": "string", "example": "home"},
+                    "timestamp": {"type": "string", "format": "date-time"},
+                    "schedule": {
+                        "type": "object",
+                        "properties": {
+                            "today": {"type": "object"},
+                            "tomorrow": {"type": "object"},
+                            "updatedOn": {"type": "string"}
+                        }
+                    }
+                }
+            },
+            "ScheduleHistoryEntry": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "example": 1236},
+                    "group_id": {"type": "string", "example": "home"},
+                    "schedule_text": {"type": "string"},
+                    "timestamp": {"type": "string"}
+                }
+            }
+        }
+    }
+}
+
+
+def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Callable) -> Blueprint:
+    """Create comprehensive API blueprint with public endpoints, OpenAPI documentation, and CORS."""
+    api_bp = Blueprint('api', __name__)
+
+    @api_bp.after_request
+    def set_cors_headers(response):
+        origin = request.headers.get('Origin')
+        if origin:
+            response.headers['Access-Control-Allow-Origin'] = origin
+        else:
+            response.headers['Access-Control-Allow-Origin'] = 'https://po2.kyiv.ua'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, HEAD, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = '*'
+        return response
+
+    @api_bp.route('', methods=['GET'])
+    @api_bp.route('/', methods=['GET'])
+    def api_index():
+        """API Root Directory with self-discovery links."""
+        return jsonify({
+            'name': 'Light Bot API',
+            'version': '1.0.0',
+            'description': 'Power availability status, event history, and power outage schedules for Kyiv and Vinnytsia',
+            'documentation': {
+                'interactive_ui': '/api/docs',
+                'openapi_spec': '/api/openapi.json',
+                'llms_txt': '/api/llms.txt'
+            },
+            'endpoints': {
+                'power_status_default': '/api/power-status',
+                'power_status_by_location': '/api/power-status/<location_id>',
+                'locations': '/api/locations',
+                'events': '/api/events?limit=50&location=home',
+                'history': '/api/history?days=30',
+                'stats': '/api/stats',
+                'schedule': '/api/schedule/<group_id>',
+                'schedule_history': '/api/schedule-history/<group_id>'
+            },
+            'monitored_locations': list(LOCATIONS.keys())
+        }), 200
+
+    @api_bp.route('/docs', methods=['GET'])
+    def docs():
+        """Swagger UI interactive documentation."""
+        return Response(SWAGGER_HTML, mimetype='text/html')
+
+    @api_bp.route('/openapi.json', methods=['GET'])
+    def openapi():
+        """OpenAPI 3.1.0 JSON specification."""
+        return jsonify(OPENAPI_SPEC), 200
+
+    @api_bp.route('/llms.txt', methods=['GET'])
+    def llms_txt():
+        """LLM Agent discovery document."""
+        return Response(LLMS_TXT, mimetype='text/plain; charset=utf-8')
+
+    @api_bp.route('/power-status', methods=['GET'])
+    @api_bp.route('/status', methods=['GET'])
+    def public_power_status_default():
+        """Get current power status for default location (home / Kyiv). Public, no token required."""
+        try:
+            loc = get_location_config('home')
+            target_file = None if not loc or loc.id == 'home' else loc.status_file
+            st = read_power_status_fn(target_file)
+            ts = st.get('timestamp')
+            group_cfg = get_group_config(loc.yasno_group if loc else 'home')
+            actual_group = group_cfg.group if group_cfg and group_cfg.group else (loc.yasno_group if loc else 'home')
+
+            resp_data = {
+                'location': loc.id if loc else 'home',
+                'name': loc.name if loc else 'Дім',
+                'status': st.get('status', 'Unknown'),
+                'last_updated': st.get('last_updated', 'Never'),
+                'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
+                'group': actual_group,
+                'group_id': loc.yasno_group if loc else 'home',
+                'yasno_group': actual_group,
+                'city': group_cfg.city if group_cfg else 'kiev'
+            }
+
+            # Supplement with the freshest voltage reading from telemetry table if available
+            loc_id = loc.id if loc else 'home'
+            latest_rd = stats_service.get_latest_reading(loc_id) if stats_service else None
+            if latest_rd:
+                if latest_rd.get('voltage') is not None:
+                    resp_data['voltage'] = latest_rd['voltage']
+                if latest_rd.get('before_relay') is not None:
+                    resp_data['before_relay'] = latest_rd['before_relay']
+                if latest_rd.get('after_relay') is not None:
+                    resp_data['after_relay'] = latest_rd['after_relay']
+                resp_data['telemetry_timestamp'] = latest_rd.get('timestamp')
+
+            if 'voltage' not in resp_data and st.get('voltage') is not None:
+                resp_data['voltage'] = st.get('voltage')
+            if 'before_relay' not in resp_data and st.get('before_relay') is not None:
+                resp_data['before_relay'] = st.get('before_relay')
+            if 'after_relay' not in resp_data and st.get('after_relay') is not None:
+                resp_data['after_relay'] = st.get('after_relay')
+            if st.get('source') is not None:
+                resp_data['source'] = st.get('source')
+
+            return jsonify(resp_data), 200
+        except Exception as e:
+            logger.error(f"Error getting public power status: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/power-status/<location_id>', methods=['GET'])
+    @api_bp.route('/status/<location_id>', methods=['GET'])
+    def public_power_status_by_location(location_id: str):
+        """Get current power status for specific location. Public, no token required."""
+        try:
+            loc = get_location_config(location_id)
+            if not loc:
+                return jsonify({
+                    'error': f'Unknown location: {location_id}',
+                    'available_locations': list(LOCATIONS.keys())
+                }), 404
+
+            target_file = None if loc.id == 'home' else loc.status_file
+            st = read_power_status_fn(target_file)
+            ts = st.get('timestamp')
+            group_cfg = get_group_config(loc.yasno_group)
+            actual_group = group_cfg.group if group_cfg and group_cfg.group else loc.yasno_group
+
+            resp_data = {
+                'location': loc.id,
+                'name': loc.name,
+                'status': st.get('status', 'Unknown'),
+                'last_updated': st.get('last_updated', 'Never'),
+                'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
+                'group': actual_group,
+                'group_id': loc.yasno_group,
+                'yasno_group': actual_group,
+                'city': group_cfg.city if group_cfg else 'kiev'
+            }
+
+            # Supplement with the freshest voltage reading from telemetry table if available
+            latest_rd = stats_service.get_latest_reading(loc.id) if stats_service else None
+            if latest_rd:
+                if latest_rd.get('voltage') is not None:
+                    resp_data['voltage'] = latest_rd['voltage']
+                if latest_rd.get('before_relay') is not None:
+                    resp_data['before_relay'] = latest_rd['before_relay']
+                if latest_rd.get('after_relay') is not None:
+                    resp_data['after_relay'] = latest_rd['after_relay']
+                resp_data['telemetry_timestamp'] = latest_rd.get('timestamp')
+
+            if 'voltage' not in resp_data and st.get('voltage') is not None:
+                resp_data['voltage'] = st.get('voltage')
+            if 'before_relay' not in resp_data and st.get('before_relay') is not None:
+                resp_data['before_relay'] = st.get('before_relay')
+            if 'after_relay' not in resp_data and st.get('after_relay') is not None:
+                resp_data['after_relay'] = st.get('after_relay')
+            if st.get('source') is not None:
+                resp_data['source'] = st.get('source')
+
+            return jsonify(resp_data), 200
+        except Exception as e:
+            logger.error(f"Error getting public power status for {location_id}: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/locations', methods=['GET'])
+    def public_locations():
+        """List all monitored locations and their current status. Public, no token required."""
+        try:
+            result = []
+            for loc in LOCATIONS.values():
+                target_file = None if loc.id == 'home' else loc.status_file
+                st = read_power_status_fn(target_file)
+                ts = st.get('timestamp')
+                group_cfg = get_group_config(loc.yasno_group)
+                actual_group = group_cfg.group if group_cfg and group_cfg.group else loc.yasno_group
+                result.append({
+                    'id': loc.id,
+                    'location': loc.id,
+                    'name': loc.name,
+                    'status': st.get('status', 'Unknown'),
+                    'last_updated': st.get('last_updated', 'Never'),
+                    'timestamp': ts.isoformat() if isinstance(ts, datetime) else None,
+                    'group': actual_group,
+                    'group_id': loc.yasno_group,
+                    'yasno_group': actual_group,
+                    'city': group_cfg.city if group_cfg else 'kiev'
+                })
+            return jsonify({'locations': result}), 200
+        except Exception as e:
+            logger.error(f"Error listing public locations: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/events', methods=['GET'])
+    def public_events():
+        """Get power events log. Public, no token required."""
+        try:
+            limit_param = request.args.get('limit')
+            if limit_param is not None:
+                try:
+                    limit_val = int(limit_param)
+                    limit = None if limit_val <= 0 else min(limit_val, 10000)
+                except ValueError:
+                    limit = 1000
+            else:
+                limit = 1000  # Default to 1000 to cover full history
+            location = request.args.get('location', default=None, type=str)
+
+            # Fetch extra event to compute prev duration for oldest event in slice
+            fetch_limit = (limit + 1) if limit else 10000
+            events = stats_service.get_recent_events(limit=fetch_limit, location=location)
+
+            result = []
+            max_returned = limit if limit else len(events)
+            for i in range(min(len(events), max_returned)):
+                e = events[i]
+                ts_str = e.timestamp.isoformat() if isinstance(e.timestamp, datetime) else str(e.timestamp)
+
+                # Calculate duration of previous state (prev in seconds)
+                prev_duration = None
+                if i + 1 < len(events):
+                    earlier = events[i + 1]
+                    try:
+                        prev_duration = max(0, int((e.timestamp - earlier.timestamp).total_seconds()))
+                    except Exception:
+                        prev_duration = None
+
+                ev_item = {
+                    'id': e.id,
+                    'timestamp': ts_str,
+                    'status': e.status,
+                    'location': e.location,
+                    't': ts_str,
+                    'on': (e.status == 'on'),
+                    'prev': prev_duration
+                }
+                if e.voltage is not None:
+                    ev_item['voltage'] = e.voltage
+                if e.before_relay is not None:
+                    ev_item['before_relay'] = e.before_relay
+                if e.after_relay is not None:
+                    ev_item['after_relay'] = e.after_relay
+                if e.source is not None:
+                    ev_item['source'] = e.source
+
+                # If event was unstable, compute min and max voltage during the interval if possible
+                if e.status == 'unstable' and stats_service and e.location:
+                    since_ts = e.timestamp
+                    until_ts = None
+                    if i > 0:
+                        # the more recent event ended this unstable period
+                        until_ts = events[i - 1].timestamp
+                    try:
+                        v_min, v_max = stats_service.get_voltage_extrema(e.location, since_ts, until=until_ts)
+                        if v_min is not None and v_max is not None:
+                            ev_item['voltage_min'] = round(v_min, 1)
+                            ev_item['voltage_max'] = round(v_max, 1)
+                    except Exception as ve:
+                        logger.debug(f"Failed to fetch voltage extrema for event {e.id}: {ve}")
+                result.append(ev_item)
+
+            # Supplement with discrete voltage threshold anomalies (outside 207-253V) for today
+            if stats_service and (location is None or location == 'home'):
+                try:
+                    now_kyiv = datetime.now(TIMEZONE)
+                    today_start = now_kyiv.replace(hour=0, minute=0, second=0, microsecond=0)
+                    anomalies = stats_service.get_voltage_anomalies(
+                        location=location or 'home',
+                        since=today_start,
+                        min_threshold=207.0,
+                        max_threshold=253.0
+                    )
+                    for anom in anomalies:
+                        start_ts = anom['start_ts']
+                        start_str = start_ts.isoformat()
+                        result.append({
+                            'id': f"va_{anom['start_id']}",
+                            'timestamp': start_str,
+                            'status': 'unstable',
+                            'location': location or 'home',
+                            't': start_str,
+                            'on': False,
+                            'voltage': anom['voltage'],
+                            'voltage_min': anom['voltage_min'],
+                            'voltage_max': anom['voltage_max'],
+                            'source': 'voltage_threshold'
+                        })
+                        end_ts = start_ts + timedelta(seconds=anom['duration_sec'])
+                        if end_ts < now_kyiv:
+                            end_str = end_ts.isoformat()
+                            result.append({
+                                'id': f"va_end_{anom['start_id']}",
+                                'timestamp': end_str,
+                                'status': 'on',
+                                'location': location or 'home',
+                                't': end_str,
+                                'on': True,
+                                'voltage': 230.0,
+                                'source': 'ha'
+                            })
+                except Exception as ae:
+                    logger.debug(f"Failed to fetch voltage anomalies: {ae}")
+
+            # Re-sort all events newest first
+            result.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+            if limit:
+                result = result[:limit]
+
+            return jsonify(result), 200
+        except Exception as e:
+            logger.error(f"Error getting public events: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/history', methods=['GET'])
+    def public_history():
+        """Get daily outage aggregated statistics. Public, no token required."""
+        try:
+            days = request.args.get('days', default=30, type=int)
+            days = max(1, min(days, 365))
+            history_data = stats_service.get_daily_history(days)
+            return jsonify(history_data), 200
+        except Exception as e:
+            logger.error(f"Error getting public history: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    def _serialize_stats(val):
+        if isinstance(val, dict):
+            res = {}
+            for k, v in val.items():
+                if isinstance(v, timedelta):
+                    res[k] = {
+                        'seconds': int(v.total_seconds()),
+                        'human': DurationFormatter.format_duration(v)
+                    }
+                elif isinstance(v, (dict, list)):
+                    res[k] = _serialize_stats(v)
+                elif isinstance(v, datetime):
+                    res[k] = v.isoformat()
+                else:
+                    res[k] = v
+            return res
+        elif isinstance(val, list):
+            return [_serialize_stats(x) for x in val]
+        elif isinstance(val, timedelta):
+            return {
+                'seconds': int(val.total_seconds()),
+                'human': DurationFormatter.format_duration(val)
+            }
+        elif isinstance(val, datetime):
+            return val.isoformat()
+        return val
+
+    @api_bp.route('/stats', methods=['GET'])
+    def public_stats():
+        """Get summary outage statistics. Public, no token required."""
+        try:
+            group_id = request.args.get('group_id', default=None, type=str)
+            if group_id:
+                data = stats_service.get_stats_for_group(group_id)
+            else:
+                data = stats_service.get_stats()
+            return jsonify(_serialize_stats(data)), 200
+        except Exception as e:
+            logger.error(f"Error getting public stats: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/schedule/<group_id>', methods=['GET'])
+    def public_schedule(group_id: str):
+        """Get latest parsed outage schedule for a group. Public, no token required."""
+        try:
+            history = stats_service.get_schedule_history(group_id, limit=1)
+            if not history:
+                return jsonify({
+                    'error': f'No schedule recorded for group: {group_id}',
+                    'available_groups': [g.id for g in LOCATIONS.values() if g.yasno_group]
+                }), 404
+
+            latest = history[0]
+            parsed_schedule = None
+            try:
+                parsed_schedule = json.loads(latest.schedule_text)
+            except (json.JSONDecodeError, TypeError):
+                parsed_schedule = {'raw': latest.schedule_text}
+
+            ts = latest.timestamp.isoformat() if isinstance(latest.timestamp, datetime) else str(latest.timestamp)
+            return jsonify({
+                'group_id': latest.group_id,
+                'timestamp': ts,
+                'schedule': parsed_schedule
+            }), 200
+        except Exception as e:
+            logger.error(f"Error getting public schedule for {group_id}: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    @api_bp.route('/schedule-history/<group_id>', methods=['GET'])
+    def public_schedule_history(group_id: str):
+        """Get schedule history entries for a group. Preserves backward compatibility. Public, no token required."""
+        try:
+            limit = request.args.get('limit', default=10, type=int)
+            limit = max(1, min(limit, 100))
+            history = stats_service.get_schedule_history(group_id, limit=limit)
+            return jsonify([h.__dict__ for h in history]), 200
+        except Exception as e:
+            logger.error(f"Error getting public schedule history for {group_id}: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    return api_bp

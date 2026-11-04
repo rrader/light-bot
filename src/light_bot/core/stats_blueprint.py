@@ -24,4 +24,14 @@ def create_stats_blueprint(stats_service: StatsService):
         history_data = stats_service.get_daily_history(days)
         return jsonify(history_data)
 
+    @bp.route('/app')
+    @bp.route('/app/<location_id>')
+    def webapp(location_id=None):
+        loc = (location_id or '').lower()
+        if loc in ['kyiv', 'kiev', 'home', '']:
+            loc = 'home'
+        elif loc in ['vinnytsia', 'vinnitsa', 'vn']:
+            loc = 'vinnytsia'
+        return render_template('webapp.html', initial_location=loc)
+
     return bp

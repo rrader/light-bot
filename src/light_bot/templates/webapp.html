@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Графік та мережа</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg-color: #f2f2f7;
+            --card-bg: #ffffff;
+            --text-color: #1c1c1e;
+            --text-secondary: #8e8e93;
+            --border-color: #e5e5ea;
+            --stat-bg: #f7f7f9;
+            --green: #1e6b2c;
+            --green-gradient-1: #1e4d2b;
+            --green-gradient-2: #13331b;
+            --red: #a81c1c;
+            --red-gradient-1: #6b0c0c;
+            --red-gradient-2: #4a0606;
+            --amber: #d96b00;
+            --amber-gradient-1: #8a5005;
+            --amber-gradient-2: #573102;
+            --gray-track: #52525b;
+            --gray-track-dark: #3f3f46;
+        }
+
+        body.dark {
+            --bg-color: #121214;
+            --card-bg: #1c1c1e;
+            --text-color: #f5f5f7;
+            --text-secondary: #98989d;
+            --border-color: #2c2c2e;
+            --stat-bg: #242426;
+            --gray-track: #3f3f46;
+            --gray-track-dark: #27272a;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        /* Top header bar */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2px 4px;
+        }
+
+        .top-bar-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .top-bar-title a {
+            color: #007aff;
+            text-decoration: underline;
+            text-underline-offset: 3px;
+            text-decoration-thickness: 1.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: opacity 0.15s ease, color 0.15s ease;
+        }
+
+        body.dark .top-bar-title a {
+            color: #2997ff;
+        }
+
+        .top-bar-title a:hover {
+            opacity: 0.8;
+            color: #0056b3;
+        }
+
+        body.dark .top-bar-title a:hover {
+            color: #64b5f6;
+        }
+
+        .top-bar-title svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+        }
+
+        .live-box {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.7; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.7; }
+        }
+
+        /* Main Card */
+        .main-card {
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 22px 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .header-title-box {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-icon {
+            font-size: 26px;
+            line-height: 1;
+        }
+
+        .header-title {
+            font-size: 21px;
+            font-weight: 700;
+            color: var(--text-color);
+            line-height: 1.2;
+        }
+
+        .status-badge {
+            padding: 7px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: white;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            transition: background 0.3s ease;
+        }
+
+        .status-on {
+            background-color: var(--green);
+        }
+
+        .status-off {
+            background-color: var(--red);
+        }
+
+        .status-unstable {
+            background-color: var(--amber);
+        }
+
+        /* Emergency warning banner */
+        .emergency-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 14px;
+            font-size: 13px;
+            color: #dc2626;
+            font-weight: 600;
+        }
+
+        body.dark .emergency-banner {
+            background: rgba(239, 68, 68, 0.18);
+            border-color: rgba(239, 68, 68, 0.45);
+            color: #f87171;
+        }
+
+        /* Subtitles & Telemetry */
+        .status-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .meta-line {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .meta-line-duration {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .telemetry-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+            padding: 10px 14px;
+            background: var(--stat-bg);
+            border-radius: 14px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .telemetry-row .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .telemetry-row .separator {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+
+        /* Timeline schedule & fact section */
+        .timeline-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .timeline-legend {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 0 4px;
+        }
+
+        .legend-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-dots {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-dots .dot-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .legend-dots .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot-green { background: #22c55e; }
+        .dot-amber { background: #f59e0b; }
+        .dot-gray { background: #64748b; }
+
+        .timeline-section {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        /* Split 2-track timeline container */
+        .timeline-bar-wrapper {
+            position: relative;
+            width: 100%;
+            height: 52px;
+            border-radius: 14px;
+            background: #141416;
+            border: 2px solid #222226;
+            overflow: hidden;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+
+        body.dark .timeline-bar-wrapper {
+            border-color: #2c2c30;
+        }
+
+        .timeline-track {
+            position: relative;
+            width: 100%;
+            height: 24px;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .timeline-track-divider {
+            width: 100%;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            z-index: 5;
+        }
+
+        .track-tag {
+            position: absolute;
+            left: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.7);
+            z-index: 6;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+        }
+
+        /* Segments: Track 1 (Schedule) */
+        .sched-seg {
+            height: 100%;
+            position: relative;
+        }
+
+        .sched-seg.on {
+            background: linear-gradient(180deg, var(--green-gradient-1) 0%, var(--green-gradient-2) 100%);
+        }
+
+        .sched-seg.off {
+            background: linear-gradient(180deg, var(--red-gradient-1) 0%, var(--red-gradient-2) 100%);
+        }
+
+        .sched-seg.maybe {
+            background: linear-gradient(180deg, var(--amber-gradient-1) 0%, var(--amber-gradient-2) 100%);
+        }
+
+        .sched-seg.emergency {
+            background: #141416;
+            background-image: repeating-linear-gradient(
+                45deg,
+                rgba(255, 255, 255, 0.03),
+                rgba(255, 255, 255, 0.03) 10px,
+                transparent 10px,
+                transparent 20px
+            );
+        }
+
+        /* Segments: Track 2 (Fact / Real Light) */
+        .fact-seg {
+            height: 100%;
+            position: relative;
+        }
+
+        .fact-seg.on {
+            background: linear-gradient(180deg, #1f7a30 0%, #155722 100%);
+        }
+
+        .fact-seg.unstable {
+            background: #facc15;
+            background: linear-gradient(180deg, #fef08a 0%, #eab308 50%, #ca8a04 100%);
+            box-shadow: 0 0 8px 1px rgba(250, 204, 21, 0.85);
+            min-width: 6px;
+            flex-shrink: 0;
+            cursor: pointer;
+            z-index: 9;
+            border-radius: 1px;
+        }
+
+        .fact-seg.off {
+            background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+        }
+
+        .fact-seg.future {
+            background: transparent;
+        }
+
+        /* Tooltip popup for hovering timeline segments */
+        .timeline-tooltip {
+            position: absolute;
+            top: -54px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #18181b;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 8px;
+            padding: 8px 12px;
+            color: #ffffff;
+            font-size: 11px;
+            line-height: 1.4;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0;
+            display: none;
+            transition: opacity 0.12s ease;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+        }
+
+        .timeline-tooltip.visible {
+            opacity: 1 !important;
+            display: block !important;
+        }
+
+        .timeline-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px;
+            border-style: solid;
+            border-color: #18181b transparent transparent transparent;
+        }
+
+        .sched-seg, .fact-seg {
+            cursor: pointer;
+            z-index: 8;
+        }
+
+        /* 24-hour grid overlay */
+        .timeline-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .timeline-grid-cell {
+            flex: 1;
+            height: 100%;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .timeline-grid-cell:last-child {
+            border-right: none;
+        }
+
+        /* Cursor line across both tracks */
+        .timeline-cursor {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: #ffffff;
+            box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.95);
+            z-index: 10;
+            transform: translateX(-50%);
+            border-radius: 2px;
+            pointer-events: none;
+        }
+
+        /* Timeline Labels below */
+        .timeline-labels {
+            position: relative;
+            width: 100%;
+            height: 18px;
+            margin-top: 2px;
+        }
+
+        .timeline-tick-label {
+            position: absolute;
+            top: 0;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        /* Bottom stat boxes */
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 2px;
+        }
+
+        .stat-box {
+            background: var(--stat-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 14px 12px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 6px;
+            min-height: 72px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            line-height: 1.2;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+    </style>
+</head>
+<body data-initial-location="{{ initial_location or 'home' }}">
+    <div class="container">
+        <!-- Top bar -->
+        <div class="top-bar">
+            <div class="top-bar-title" id="pageTitleContainer">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                </svg>
+                <a href="https://po2.kyiv.ua/" target="_blank" rel="noopener noreferrer" id="pageSubtitleLink">Паркові озера 2</a>
+            </div>
+            <div class="live-box">
+                <div class="pulse-dot" id="liveDot"></div>
+                <span id="liveStatusText">Live</span>
+            </div>
+        </div>
+
+        <!-- Main Card -->
+        <div class="main-card">
+            <!-- Header -->
+            <div class="card-header">
+                <div class="header-title-box">
+                    <div class="header-icon" id="headerIcon">☀️</div>
+                    <div class="header-title" id="headerTitle">Група 53.1</div>
+                </div>
+                <div class="status-badge status-on" id="statusBadge">Є СВІТЛО</div>
+            </div>
+
+            <!-- Emergency Warning Banner (hidden when normal) -->
+            <div class="emergency-banner" id="emergencyBanner" style="display: none;">
+                <span>🚨</span>
+                <span><b>Екстрені відключення!</b> Погодинні графіки наразі скасовано.</span>
+            </div>
+
+            <!-- Status Subtitles -->
+            <div class="status-meta">
+                <div class="meta-line" id="statusEventLine">Світло ввімкнули о --:--</div>
+                <div class="meta-line-duration" id="statusDurationLine">Тривалість: -- год -- хв</div>
+            </div>
+
+            <!-- Live Voltage & Telemetry -->
+            <div class="telemetry-row">
+                <span class="pill" id="voltagePill">⚡️ Напруга: <b id="voltageVal">-- В</b></span>
+                <span class="separator">•</span>
+                <span class="pill" id="relayPill">Реле: <b id="relayVal">--</b></span>
+                <span class="separator">•</span>
+                <span class="pill" id="updatedPill">Оновлено: <b id="updatedVal">щойно</b></span>
+            </div>
+
+            <!-- 2-Track visual timeline bar -->
+            <div class="timeline-section">
+                <!-- Floating tooltip for segment inspect -->
+                <div class="timeline-tooltip" id="timelineTooltip"></div>
+
+                <!-- Legend -->
+                <div class="timeline-legend">
+                    <div class="legend-left">
+                        <span>ПЛАН ТА ФАКТ (24 ГОДИНИ)</span>
+                    </div>
+                    <div class="legend-dots">
+                        <span class="dot-item"><span class="dot dot-green"></span> є</span>
+                        <span class="dot-item"><span class="dot dot-amber"></span> нестаб.</span>
+                        <span class="dot-item"><span class="dot dot-gray"></span> нема</span>
+                    </div>
+                </div>
+
+                <!-- Split Container -->
+                <div class="timeline-bar-wrapper">
+                    <!-- Top Track: Schedule -->
+                    <div class="timeline-track" id="timelineScheduleTrack">
+                        <span class="track-tag">План</span>
+                    </div>
+
+                    <!-- Horizontal divider -->
+                    <div class="timeline-track-divider"></div>
+
+                    <!-- Bottom Track: Fact (Real light) -->
+                    <div class="timeline-track" id="timelineFactTrack">
+                        <span class="track-tag">Факт</span>
+                    </div>
+
+                    <!-- 24 hourly vertical grid dividers -->
+                    <div class="timeline-grid" id="timelineGrid"></div>
+
+                    <!-- White current time cursor line -->
+                    <div class="timeline-cursor" id="timelineCursor" style="left: 50%;"></div>
+                </div>
+
+                <!-- Time ticks below bar -->
+                <div class="timeline-labels" id="timelineLabels"></div>
+            </div>
+
+            <!-- Bottom stat cards -->
+            <div class="stat-grid">
+                <div class="stat-box">
+                    <div class="stat-label" id="leftStatLabel">Всього за добу без світла</div>
+                    <div class="stat-value" id="outageStatVal">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label" id="rightStatLabel">Наступне відключення</div>
+                    <div class="stat-value" id="rightStatVal">--</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Close tooltip when clicking outside on mobile
+        document.addEventListener('touchstart', (e) => {
+            if (!e.target.closest('.sched-seg') && !e.target.closest('.fact-seg')) {
+                hideTimelineTooltip();
+            }
+        });
+
+        // Initialize Telegram WebApp
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+            tg.ready();
+            tg.expand();
+            if (tg.colorScheme === 'dark') {
+                document.body.classList.add('dark');
+            }
+            tg.onEvent('themeChanged', () => {
+                if (tg.colorScheme === 'dark') {
+                    document.body.classList.add('dark');
+                } else {
+                    document.body.classList.remove('dark');
+                }
+            });
+        }
+
+        // Build 24 grid lines
+        const gridEl = document.getElementById('timelineGrid');
+        for (let i = 0; i < 24; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'timeline-grid-cell';
+            gridEl.appendChild(cell);
+        }
+
+        // Resolve active location: URL path (/app/kyiv, /app/vinnytsia), query (?loc=), start_param, or dataset
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+        let pathLoc = null;
+        if (pathParts.length >= 2 && pathParts[0] === 'app') {
+            pathLoc = pathParts[1].toLowerCase();
+            if (pathLoc === 'kyiv' || pathLoc === 'kiev') pathLoc = 'home';
+        }
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryLoc = urlParams.get('loc');
+        const startParam = tg?.initDataUnsafe?.start_param;
+        let currentLocation = pathLoc || queryLoc || startParam || document.body.dataset.initialLocation || 'home';
+        if (currentLocation === 'kyiv' || currentLocation === 'kiev') currentLocation = 'home';
+
+        // Helper to format minutes into HH:MM
+        function minsToTimeStr(mins) {
+            const h = String(Math.floor(mins / 60) % 24).padStart(2, '0');
+            const m = String(mins % 60).padStart(2, '0');
+            return `${h}:${m}`;
+        }
+
+        // Helper to format duration string
+        function formatDuration(diffMs) {
+            if (diffMs < 0) diffMs = 0;
+            const totalMins = Math.floor(diffMs / 60000);
+            const hrs = Math.floor(totalMins / 60);
+            const mins = totalMins % 60;
+            return `${String(hrs).padStart(2, '0')} год ${String(mins).padStart(2, '0')} хв`;
+        }
+
+        // Update cursor position continuously
+        function updateCursor() {
+            const now = new Date();
+            const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+            const parts = kyivTimeStr.split(':');
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            const totalMinutes = (hours * 60) + minutes;
+            const pct = (totalMinutes / 1440) * 100;
+            const cursorEl = document.getElementById('timelineCursor');
+            if (cursorEl) {
+                cursorEl.style.left = `${pct.toFixed(2)}%`;
+            }
+        }
+        setInterval(updateCursor, 10000);
+        updateCursor();
+
+        // State holder for duration recalculation and last sync badge
+        let currentStatusStart = null;
+        let currentStatusType = 'on';
+        let lastSyncTime = new Date();
+        let lastTelemetryTime = null; // Server's latest telemetry timestamp
+
+        function tickSyncBadge() {
+            const updatedEl = document.getElementById('updatedVal');
+            const liveDot = document.getElementById('liveDot');
+            const liveStatusText = document.getElementById('liveStatusText');
+
+            if (updatedEl && lastSyncTime) {
+                const diffSec = Math.floor((new Date() - lastSyncTime) / 1000);
+                if (diffSec < 15) {
+                    updatedEl.textContent = 'щойно';
+                } else if (diffSec < 60) {
+                    updatedEl.textContent = `${diffSec} с тому`;
+                } else {
+                    updatedEl.textContent = `${Math.floor(diffSec / 60)} хв тому`;
+                }
+            }
+
+            // Check freshness of telemetry data (or screen sync): if > 10 minutes without telemetry, mark Offline
+            let isStale = false;
+            const now = new Date();
+            if (lastTelemetryTime && !isNaN(lastTelemetryTime.getTime())) {
+                const telemetryAgeSec = (now - lastTelemetryTime) / 1000;
+                if (telemetryAgeSec > 600) { // 10 minutes
+                    isStale = true;
+                }
+            } else if (lastSyncTime) {
+                const syncAgeSec = (now - lastSyncTime) / 1000;
+                if (syncAgeSec > 600) {
+                    isStale = true;
+                }
+            }
+
+            if (liveDot && liveStatusText) {
+                if (isStale) {
+                    liveDot.style.background = '#8e8e93';
+                    liveDot.style.animation = 'none';
+                    liveStatusText.textContent = 'Offline';
+                    liveStatusText.style.color = '#8e8e93';
+                } else {
+                    liveStatusText.textContent = 'Live';
+                    liveStatusText.style.color = '';
+                    liveDot.style.background = 'var(--green)';
+                    liveDot.style.animation = 'pulse 2s infinite ease-in-out';
+                }
+            }
+        }
+        setInterval(tickSyncBadge, 2000);
+
+        function tickDuration() {
+            if (!currentStatusStart) return;
+            const now = new Date();
+            const diffMs = now - currentStatusStart;
+            document.getElementById('statusDurationLine').textContent = `Тривалість: ${formatDuration(diffMs)}`;
+        }
+        setInterval(tickDuration, 10000);
+
+        // Fetch power status, schedule and events
+        async function fetchData() {
+            try {
+                // 1. Fetch power status
+                const statusRes = await fetch(`/api/power-status/${currentLocation}`);
+                const statusData = await statusRes.json();
+
+                // 2. Fetch schedule
+                let scheduleData = null;
+                try {
+                    const scheduleRes = await fetch(`/api/schedule/${currentLocation}`);
+                    if (scheduleRes.ok) {
+                        scheduleData = await scheduleRes.json();
+                    }
+                } catch (e) {
+                    console.warn("Schedule not available:", e);
+                }
+
+                // 3. Fetch recent events to compute fact track and status duration
+                let eventsData = [];
+                try {
+                    const evRes = await fetch(`/api/events?limit=100&location=${currentLocation}`);
+                    if (evRes.ok) {
+                        eventsData = await evRes.json();
+                    }
+                } catch (e) {
+                    console.warn("Events not available:", e);
+                }
+
+                lastSyncTime = new Date();
+                tickSyncBadge();
+                renderView(statusData, scheduleData, eventsData);
+            } catch (e) {
+                console.error("Failed to load status:", e);
+            }
+        }
+
+        function renderView(statusInfo, scheduleInfo, eventsList) {
+            const isHome = (currentLocation === 'home');
+            const actualGroup = statusInfo.group || (isHome ? '53.1' : '2.1');
+            document.getElementById('headerTitle').textContent = `Група ${actualGroup}`;
+
+            const pageLinkEl = document.getElementById('pageSubtitleLink');
+            if (pageLinkEl) {
+                if (isHome) {
+                    pageLinkEl.textContent = 'Паркові озера 2';
+                    pageLinkEl.href = 'https://po2.kyiv.ua/';
+                } else {
+                    pageLinkEl.textContent = 'Графік та мережа • Вінниця';
+                    pageLinkEl.href = 'https://light.rmn.pp.ua/app/vinnytsia';
+                }
+            }
+
+            // Store server telemetry timestamp if present
+            if (statusInfo.telemetry_timestamp) {
+                lastTelemetryTime = new Date(statusInfo.telemetry_timestamp);
+            } else if (statusInfo.timestamp) {
+                lastTelemetryTime = new Date(statusInfo.timestamp);
+            }
+
+            const status = (statusInfo.status || 'unknown').toLowerCase();
+            currentStatusType = status;
+
+            const badge = document.getElementById('statusBadge');
+            const icon = document.getElementById('headerIcon');
+            const liveDot = document.getElementById('liveDot');
+            const emergencyBanner = document.getElementById('emergencyBanner');
+
+            badge.className = 'status-badge';
+            if (status === 'on') {
+                badge.classList.add('status-on');
+                badge.textContent = 'Є СВІТЛО';
+                icon.textContent = '☀️';
+            } else if (status === 'unstable') {
+                badge.classList.add('status-unstable');
+                badge.textContent = 'НЕСТАБІЛЬНА НАПРУГА';
+                icon.textContent = '🟡';
+            } else {
+                badge.classList.add('status-off');
+                badge.textContent = 'НЕМАЄ СВІТЛА';
+                icon.textContent = '🌑';
+            }
+
+            // Emergency Shutdowns check
+            const todaySchedule = scheduleInfo?.schedule?.today;
+            const isEmergency = (todaySchedule?.status === 'EmergencyShutdowns');
+            if (isEmergency) {
+                emergencyBanner.style.display = 'flex';
+                if (status === 'off') {
+                    icon.textContent = '🚨';
+                }
+            } else {
+                emergencyBanner.style.display = 'none';
+            }
+
+            // Determine status start time from events or status timestamp
+            let startTime = null;
+            if (eventsList && eventsList.length > 0) {
+                const matchEv = eventsList.find(e => (e.status || (e.on ? 'on' : 'off')) === status);
+                if (matchEv && (matchEv.timestamp || matchEv.t)) {
+                    startTime = new Date(matchEv.timestamp || matchEv.t);
+                }
+            }
+            if (!startTime && statusInfo.timestamp) {
+                startTime = new Date(statusInfo.timestamp);
+            }
+
+            if (startTime && !isNaN(startTime.getTime())) {
+                currentStatusStart = startTime;
+                const timeStr = startTime.toLocaleTimeString('uk-UA', { timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit' });
+                if (status === 'on') {
+                    document.getElementById('statusEventLine').textContent = `Світло ввімкнули о ${timeStr}`;
+                } else if (status === 'unstable') {
+                    document.getElementById('statusEventLine').textContent = `Нестабільна напруга з ${timeStr}`;
+                } else {
+                    document.getElementById('statusEventLine').textContent = `Світло вимкнули о ${timeStr}`;
+                }
+                const diffMs = new Date() - startTime;
+                document.getElementById('statusDurationLine').textContent = `Тривалість: ${formatDuration(diffMs)}`;
+            } else {
+                document.getElementById('statusEventLine').textContent = (status === 'on' ? 'Світло є' : status === 'unstable' ? 'Нестабільна напруга' : 'Знеструмлено');
+                document.getElementById('statusDurationLine').textContent = 'Статус активний';
+            }
+
+            // Voltage & Telemetry
+            const voltage = statusInfo.voltage;
+            if (voltage !== undefined && voltage !== null && voltage > 0) {
+                document.getElementById('voltageVal').textContent = `${voltage.toFixed(1)} В`;
+            } else {
+                document.getElementById('voltageVal').textContent = '-- В';
+            }
+
+            // Relay state
+            if (statusInfo.before_relay !== undefined && statusInfo.after_relay !== undefined) {
+                const relayEl = document.getElementById('relayVal');
+                if (statusInfo.after_relay) {
+                    relayEl.textContent = 'увімкнено';
+                    relayEl.style.color = 'var(--green)';
+                } else if (statusInfo.before_relay) {
+                    relayEl.textContent = 'відімкнуто (захист)';
+                    relayEl.style.color = 'var(--amber)';
+                } else {
+                    relayEl.textContent = 'знеструмлено';
+                    relayEl.style.color = 'var(--red)';
+                }
+            } else {
+                const relayEl = document.getElementById('relayVal');
+                relayEl.textContent = (status === 'on' ? 'норма' : 'відключено');
+                relayEl.style.color = (status === 'on' ? 'var(--green)' : 'var(--red)');
+            }
+
+            // Relative updated time: kept updated by tickSyncBadge() based on lastSyncTime
+            tickSyncBadge();
+
+            // Render 2-track timeline (Schedule + Fact)
+            renderDualTimeline(scheduleInfo, eventsList, status);
+        }
+
+        function showTimelineTooltip(e, text) {
+            const tooltip = document.getElementById('timelineTooltip');
+            if (!tooltip) return;
+            tooltip.innerHTML = text;
+            tooltip.classList.add('visible');
+
+            const section = document.querySelector('.timeline-section');
+            if (section) {
+                const rect = section.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const x = clientX - rect.left;
+                const clampedX = Math.max(60, Math.min(x, rect.width - 60));
+                tooltip.style.left = `${clampedX}px`;
+            }
+        }
+
+        function hideTimelineTooltip() {
+            const tooltip = document.getElementById('timelineTooltip');
+            if (tooltip) {
+                tooltip.classList.remove('visible');
+            }
+        }
+
+        function renderDualTimeline(scheduleInfo, eventsList, currentStatus) {
+            const schedContainer = document.getElementById('timelineScheduleTrack');
+            const factContainer = document.getElementById('timelineFactTrack');
+            const labelsContainer = document.getElementById('timelineLabels');
+
+            // Reset tracks while preserving track-tag
+            schedContainer.innerHTML = '<span class="track-tag">План</span>';
+            factContainer.innerHTML = '<span class="track-tag">Факт</span>';
+            labelsContainer.innerHTML = '';
+
+            const now = new Date();
+            const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+            const parts = kyivTimeStr.split(':');
+            const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+
+            // ==========================================
+            // 1. TOP TRACK: SCHEDULE
+            // ==========================================
+            const today = scheduleInfo?.schedule?.today;
+            const slots = today?.slots || [];
+            const schedStatus = today?.status;
+            const isEmergency = (schedStatus === 'EmergencyShutdowns');
+
+            const boundaryMinutes = [0];
+            let scheduledOutageMins = 0;
+            let nextOutageText = '--';
+
+            if (isEmergency || slots.length === 0) {
+                // When emergency shutdowns: make timeline dark gray/black pattern, not green
+                const seg = document.createElement('div');
+                seg.className = 'sched-seg emergency';
+                seg.style.width = '100%';
+
+                const labelText = isEmergency ? '🚨 Екстрені відключення (графік не діє)' : 'Графік відключень відсутній';
+                seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
+                seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, `<b>План:</b> ${labelText}`));
+                seg.addEventListener('mouseleave', hideTimelineTooltip);
+                seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, `<b>План:</b> ${labelText}`); e.stopPropagation(); });
+
+                schedContainer.appendChild(seg);
+
+                boundaryMinutes.push(1440);
+                document.getElementById('rightStatLabel').textContent = '🚨 Стан графіка';
+                document.getElementById('rightStatVal').textContent = (isEmergency ? 'Екстрені відключення' : 'Без відключень');
+            } else {
+                slots.forEach(slot => {
+                    const duration = slot.end - slot.start;
+                    const widthPct = (duration / 1440) * 100;
+                    const seg = document.createElement('div');
+                    seg.className = 'sched-seg';
+                    seg.style.width = `${widthPct}%`;
+
+                    const isOutage = (slot.type === 'Definite' || slot.type === 'Maybe');
+                    let statusLabel = 'Світло за графіком';
+                    if (isOutage) {
+                        seg.classList.add(slot.type === 'Maybe' ? 'maybe' : 'off');
+                        scheduledOutageMins += duration;
+                        statusLabel = (slot.type === 'Maybe' ? 'Можливе відключення' : 'Відключення за графіком');
+                        if (slot.start > currentMins && nextOutageText === '--') {
+                            nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
+                        }
+                    } else {
+                        seg.classList.add('on');
+                    }
+
+                    const durHours = Math.floor(duration / 60);
+                    const durMins = duration % 60;
+                    const durText = (durHours > 0 ? `${durHours} год ` : '') + (durMins > 0 ? `${durMins} хв` : '');
+                    const tipText = `<b>План:</b> ${statusLabel}<br>Час: <b>${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}</b> (${durText})`;
+
+                    seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mouseleave', hideTimelineTooltip);
+                    seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, tipText); e.stopPropagation(); });
+
+                    schedContainer.appendChild(seg);
+
+                    if (!boundaryMinutes.includes(slot.start)) boundaryMinutes.push(slot.start);
+                    if (!boundaryMinutes.includes(slot.end) && slot.end < 1440) boundaryMinutes.push(slot.end);
+                });
+
+                document.getElementById('rightStatLabel').textContent = 'Наступне відключення';
+                document.getElementById('rightStatVal').textContent = nextOutageText;
+            }
+
+            // ==========================================
+            // 2. BOTTOM TRACK: FACT (REAL LIGHT)
+            // ==========================================
+            const factSegments = buildFactSegments(eventsList, currentStatus, currentMins);
+            let factOutageSec = 0;
+
+            factSegments.forEach(segData => {
+                const duration = segData.end - segData.start;
+                const widthPct = (duration / 1440) * 100;
+                const seg = document.createElement('div');
+                seg.className = `fact-seg ${segData.status}`;
+                seg.style.width = `${widthPct}%`;
+
+                // Tooltip for fact segment
+                let statusLabel = 'Є світло (норма)';
+                if (segData.status === 'unstable') {
+                    statusLabel = 'Нестабільна напруга';
+                } else if (segData.status === 'off') {
+                    statusLabel = 'Немає світла (відключення)';
+                } else if (segData.status === 'future') {
+                    statusLabel = 'Майбутній час';
+                }
+
+                const totalSec = segData.durationSec !== undefined ? segData.durationSec : Math.round(duration * 60);
+                let durText = '';
+                if (totalSec < 60) {
+                    durText = `${totalSec} сек`;
+                } else {
+                    const durHours = Math.floor(totalSec / 3600);
+                    const durMins = Math.floor((totalSec % 3600) / 60);
+                    const durSecs = totalSec % 60;
+                    if (durHours > 0) {
+                        durText = `${durHours} год` + (durMins > 0 ? ` ${durMins} хв` : '');
+                    } else if (durMins > 0) {
+                        durText = `${durMins} хв` + (durSecs > 0 ? ` ${durSecs} сек` : '');
+                    }
+                }
+
+                let timeRangeStr = '';
+                if (segData.startDate && segData.endDate) {
+                    const sStr = segData.startDate.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                    const eStr = segData.endDate.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                    if (totalSec < 60) {
+                        timeRangeStr = `${sStr} – ${eStr}`;
+                    } else {
+                        timeRangeStr = `${sStr.slice(0, 5)} – ${eStr.slice(0, 5)}`;
+                    }
+                } else {
+                    timeRangeStr = `${minsToTimeStr(segData.start)} – ${minsToTimeStr(segData.end)}`;
+                }
+
+                let tipText = `<b>Факт:</b> ${statusLabel}<br>Час: <b>${timeRangeStr}</b> (${durText})`;
+
+                if (segData.status === 'unstable') {
+                    if (segData.voltage_min !== undefined && segData.voltage_max !== undefined && segData.voltage_min !== segData.voltage_max) {
+                        tipText += `<br>Діапазон: <b>${segData.voltage_min} – ${segData.voltage_max} В</b>`;
+                    } else if (segData.voltage !== undefined && segData.voltage !== null && Number(segData.voltage) > 0) {
+                        tipText += `<br>Напруга: <b>${segData.voltage} В</b>`;
+                    }
+                }
+
+                if (segData.status !== 'future') {
+                    seg.addEventListener('mouseenter', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mousemove', (e) => showTimelineTooltip(e, tipText));
+                    seg.addEventListener('mouseleave', hideTimelineTooltip);
+                    seg.addEventListener('touchstart', (e) => { showTimelineTooltip(e, tipText); e.stopPropagation(); });
+                }
+
+                factContainer.appendChild(seg);
+
+                if (segData.status === 'off' || segData.status === 'unstable') {
+                    factOutageSec += totalSec;
+                }
+            });
+
+            // Update left stat card: show scheduled or fact outage hours
+            if (isEmergency) {
+                document.getElementById('leftStatLabel').textContent = 'Всього за добу без світла (факт)';
+                const factOutageMins = Math.floor(factOutageSec / 60);
+                const fH = Math.floor(factOutageMins / 60);
+                const fM = factOutageMins % 60;
+                document.getElementById('outageStatVal').textContent = `${fH} год ${fM} хв`;
+            } else {
+                document.getElementById('leftStatLabel').textContent = 'Всього за добу за графіком';
+                const outHours = Math.floor(scheduledOutageMins / 60);
+                const outPct = Math.round((scheduledOutageMins / 1440) * 100);
+                document.getElementById('outageStatVal').textContent = `${outHours} год (${outPct}%)`;
+            }
+
+            // ==========================================
+            // 3. BOUNDARY LABELS
+            // ==========================================
+            boundaryMinutes.sort((a, b) => a - b).forEach(mins => {
+                addLabel(labelsContainer, mins, minsToTimeStr(mins));
+            });
+        }
+
+        // Reconstruct fact segments from today's events: green (on), yellow (unstable), gray (off)
+        function buildFactSegments(eventsList, currentStatus, currentMins) {
+            const now = new Date();
+            const kyivDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' }); // YYYY-MM-DD
+            const todayEvents = [];
+            let lastEventBeforeToday = null;
+
+            (eventsList || []).forEach(e => {
+                const rawTs = e.timestamp || e.t;
+                if (!rawTs) return;
+                const d = new Date(rawTs);
+                const eventKyivDate = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' });
+                const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
+                const parts = kyivTimeStr.split(':');
+                const secs = (parseInt(parts[0], 10) * 3600) + (parseInt(parts[1], 10) * 60) + parseInt(parts[2], 10);
+                const mins = secs / 60;
+                let st = (e.status || (e.on ? 'on' : 'off')).toLowerCase();
+
+                const parsed = {
+                    date: eventKyivDate,
+                    mins,
+                    secs,
+                    status: st,
+                    voltage: e.voltage,
+                    voltage_min: e.voltage_min,
+                    voltage_max: e.voltage_max,
+                    rawDate: d
+                };
+
+                if (eventKyivDate === kyivDateStr) {
+                    todayEvents.push(parsed);
+                } else if (eventKyivDate < kyivDateStr) {
+                    if (!lastEventBeforeToday || parsed.rawDate > lastEventBeforeToday.rawDate) {
+                        lastEventBeforeToday = parsed;
+                    }
+                }
+            });
+
+            todayEvents.sort((a, b) => a.rawDate - b.rawDate);
+
+            const intervals = [];
+
+            // Determine status at midnight (00:00):
+            // 1. From the last recorded event prior to today if present
+            // 2. Otherwise inferred from the first event of today
+            // 3. Otherwise steady state of currentStatus
+            let initialStatus = 'on';
+            if (lastEventBeforeToday) {
+                initialStatus = lastEventBeforeToday.status;
+            } else if (todayEvents.length > 0) {
+                const firstEv = todayEvents[0];
+                initialStatus = (firstEv.status === 'on') ? 'off' : 'on';
+            } else {
+                initialStatus = currentStatus;
+            }
+
+            if (todayEvents.length === 0) {
+                // Steady state all day
+                intervals.push({
+                    start: 0,
+                    end: currentMins,
+                    startDate: new Date(new Date().setHours(0,0,0,0)),
+                    endDate: now,
+                    durationSec: Math.round(currentMins * 60),
+                    status: initialStatus
+                });
+            } else {
+                const firstEv = todayEvents[0];
+                if (firstEv.mins > 0) {
+                    intervals.push({
+                        start: 0,
+                        end: firstEv.mins,
+                        startDate: new Date(new Date().setHours(0,0,0,0)),
+                        endDate: firstEv.rawDate,
+                        durationSec: Math.max(1, Math.round(firstEv.mins * 60)),
+                        status: initialStatus
+                    });
+                }
+
+                for (let i = 0; i < todayEvents.length; i++) {
+                    const ev = todayEvents[i];
+                    const nextEv = (i + 1 < todayEvents.length) ? todayEvents[i + 1] : null;
+                    const nextMins = nextEv ? nextEv.mins : currentMins;
+                    const nextDate = nextEv ? nextEv.rawDate : now;
+                    const durSec = Math.max(1, Math.round((nextDate - ev.rawDate) / 1000));
+
+                    if (nextMins > ev.mins || ev.status === 'unstable') {
+                        intervals.push({
+                            start: ev.mins,
+                            end: Math.max(nextMins, ev.mins + 0.1),
+                            startDate: ev.rawDate,
+                            endDate: nextDate,
+                            durationSec: durSec,
+                            status: ev.status,
+                            voltage: ev.voltage,
+                            voltage_min: ev.voltage_min,
+                            voltage_max: ev.voltage_max
+                        });
+                    }
+                }
+            }
+
+            // Treat short 'unstable' segments (<= 90s) directly following 'off' and preceding 'on'
+            // as standard relay power-on delay (part of power-on restoration), NOT as a power instability.
+            for (let i = 0; i < intervals.length; i++) {
+                const cur = intervals[i];
+                if (cur.status === 'unstable') {
+                    const prev = (i > 0) ? intervals[i - 1] : null;
+                    const next = (i + 1 < intervals.length) ? intervals[i + 1] : null;
+                    const prevStatus = prev ? prev.status : initialStatus;
+                    const nextStatus = next ? next.status : currentStatus;
+                    const durSec = cur.durationSec || Math.round((cur.end - cur.start) * 60);
+
+                    if (prevStatus === 'off' && nextStatus === 'on' && durSec <= 90) {
+                        cur.status = 'on';
+                    }
+                }
+            }
+
+            // Filter out transient noise/glitches (< 2 minutes) where an 'off' spike immediately reverts
+            // NEVER swallow 'unstable' events: user explicitly wants to see every detected instability
+            const debounced = [];
+            for (let i = 0; i < intervals.length; i++) {
+                const cur = intervals[i];
+                if (cur.status === 'unstable') {
+                    debounced.push(cur);
+                    continue;
+                }
+                const dur = cur.end - cur.start;
+                // If a transient glitch of 1 minute occurs between two segments of the same status, bridge them
+                if (dur <= 1 && i > 0 && i + 1 < intervals.length && intervals[i - 1].status === intervals[i + 1].status && intervals[i - 1].status !== 'unstable') {
+                    intervals[i - 1].end = cur.end; // expand previous to swallow the glitch
+                    intervals[i - 1].endDate = cur.endDate;
+                    intervals[i - 1].durationSec = (intervals[i - 1].durationSec || 0) + (cur.durationSec || 0);
+                    continue;
+                }
+                debounced.push(cur);
+            }
+
+            // Merge contiguous identical statuses (keep discrete instabilities distinguishable)
+            const merged = [];
+            debounced.forEach(inv => {
+                if (inv.end <= inv.start) return;
+                if (merged.length > 0 && merged[merged.length - 1].status === inv.status && inv.status !== 'unstable') {
+                    const last = merged[merged.length - 1];
+                    last.end = inv.end;
+                    last.endDate = inv.endDate;
+                    last.durationSec = (last.durationSec || 0) + (inv.durationSec || 0);
+                    if (inv.voltage_min !== undefined) {
+                        last.voltage_min = (last.voltage_min !== undefined) ? Math.min(last.voltage_min, inv.voltage_min) : inv.voltage_min;
+                    }
+                    if (inv.voltage_max !== undefined) {
+                        last.voltage_max = (last.voltage_max !== undefined) ? Math.max(last.voltage_max, inv.voltage_max) : inv.voltage_max;
+                    }
+                } else {
+                    merged.push({ ...inv });
+                }
+            });
+
+            // Future segment from current minute to 24:00
+            if (currentMins < 1440) {
+                merged.push({ start: currentMins, end: 1440, status: 'future' });
+            }
+
+            return merged;
+        }
+
+        function addLabel(parent, mins, text) {
+            const span = document.createElement('span');
+            span.className = 'timeline-tick-label';
+            span.textContent = text;
+            const pct = (mins / 1440) * 100;
+
+            if (mins === 0) {
+                span.style.left = '0';
+            } else if (mins >= 1420) {
+                span.style.right = '0';
+            } else {
+                span.style.left = `${pct.toFixed(2)}%`;
+                span.style.transform = 'translateX(-50%)';
+            }
+            parent.appendChild(span);
+        }
+
+        // Initial fetch and 10s auto-refresh
+        fetchData();
+        setInterval(fetchData, 10000);
+    </script>
+</body>
+</html>

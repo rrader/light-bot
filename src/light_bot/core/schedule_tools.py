@@ -51,14 +51,25 @@ def is_continuous_outage(today_end_minutes: int, tomorrow_start_minutes: int) ->
     return today_end_minutes >= MINUTES_PER_DAY and tomorrow_start_minutes == 0
 
 
-def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Optional[Tuple[datetime, datetime]]:
+def _get_group_schedule(schedule_data, group: str, city: Optional[str] = None):
+    """Helper to safely fetch GroupSchedule supporting optional city argument"""
+    if not hasattr(schedule_data, 'get_group'):
+        return None
+    try:
+        return schedule_data.get_group(group, city=city)
+    except TypeError:
+        return schedule_data.get_group(group)
+
+
+def find_next_outage(schedule_data: YasnoScheduleResponse, group: str, city: Optional[str] = None) -> Optional[Tuple[datetime, datetime]]:
     """Find the next scheduled outage (start time, end time)
 
     Handles midnight boundary cases and continuous outages across midnight.
 
     Args:
-        schedule_data: Schedule data from Yasno API
-        group: Power group (e.g., "2.1")
+        schedule_data: Schedule data from API
+        group: Power group (e.g., "2.1", "3.1")
+        city: Optional city name (e.g., "kiev", "vinnytsia")
 
     Returns:
         Tuple of (outage_start_datetime, outage_end_datetime) or None if no upcoming outage
@@ -70,9 +81,9 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
         now = datetime.now(TIMEZONE)
         current_minutes = now.hour * 60 + now.minute
 
-        group_schedule = schedule_data.get_group(group)
+        group_schedule = _get_group_schedule(schedule_data, group, city=city)
         if not group_schedule:
-            logger.warning(f"Group {group} not found in schedule")
+            logger.warning(f"Group {group} ({city}) not found in schedule")
             return None
 
         # Check today's schedule first
@@ -123,12 +134,13 @@ def find_next_outage(schedule_data: YasnoScheduleResponse, group: str) -> Option
         return None
 
 
-def is_currently_in_outage(schedule_data: YasnoScheduleResponse, group: str) -> bool:
+def is_currently_in_outage(schedule_data: YasnoScheduleResponse, group: str, city: Optional[str] = None) -> bool:
     """Check if the group is currently in the middle of an outage
 
     Args:
-        schedule_data: Schedule data from Yasno API
-        group: Power group (e.g., "2.1")
+        schedule_data: Schedule data from API
+        group: Power group (e.g., "2.1", "3.1")
+        city: Optional city name (e.g., "kiev", "vinnytsia")
 
     Returns:
         True if current time falls within an active outage slot
@@ -137,7 +149,7 @@ def is_currently_in_outage(schedule_data: YasnoScheduleResponse, group: str) -> 
         now = datetime.now(TIMEZONE)
         current_minutes = now.hour * 60 + now.minute
 
-        group_schedule = schedule_data.get_group(group)
+        group_schedule = _get_group_schedule(schedule_data, group, city=city)
         if not group_schedule:
             return False
 

@@ -3,7 +3,19 @@
 source .env
 
 # Configuration
-TARGET_IP="${TARGET_IP:-192.168.1.152}"
+LOCATION="${1:-${LOCATION:-home}}"
+
+if [ "$LOCATION" = "vinnytsia" ]; then
+    PING_TARGETS="${PING_TARGETS:-${SMART_SOCKET_IP_VINNYTSIA:-192.168.1.93}}"
+else
+    # Default home targets (backward compatible with original variables)
+    SMART_SOCKET_IP="${SMART_SOCKET_IP:-192.168.1.152}"
+    AC1_IP="${AC1_IP:-192.168.1.77}"
+    AC2_IP="${AC2_IP:-192.168.1.94}"
+    AC3_IP="${AC3_IP:-192.168.1.206}"
+    PING_TARGETS="${PING_TARGETS:-$SMART_SOCKET_IP $AC1_IP $AC2_IP $AC3_IP}"
+fi
+
 TARGET_UDR_IP="${TARGET_UDR_IP:-192.168.1.10}"
 API_URL_PROD="https://light.rmn.pp.ua/power-status"
 API_URL_STAGING="https://light-staging.rmn.pp.ua/power-status"
@@ -26,30 +38,39 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# Function to check if host is reachable
+# Function to check if any ping target is reachable
 check_host() {
-    if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$TARGET_IP" > /dev/null 2>&1; then
-        return 0  # Host is up
-    else
-        return 1  # Host is down
-    fi
+    for ip in $PING_TARGETS; do
+        if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" "$ip" > /dev/null 2>&1; then
+            return 0  # At least one host is up
+        fi
+    done
+    return 1  # All hosts are down
 }
 
-check_udr_host() {
-    if curl -sk -H "X-API-Key: $UDR_API_KEY" https://localhost/proxy/network/api/s/default/stat/sta | jq -e ".data[] | select(.ip==\"$TARGET_UDR_IP\")" >/dev/null 2>&1; then
-        return 0  # Host is up
-    else
-        return 1  # Host is down
-    fi
-}
+# check_udr_host() {
+#     if curl -sk -H "X-API-Key: $UDR_API_KEY" https://localhost/proxy/network/api/s/default/stat/sta | jq -e ".data[] | select(.ip==\"$TARGET_UDR_IP\")" >/dev/null 2>&1; then
+#         return 0  # Host is up
+#     else
+#         return 1  # Host is down
+#     fi
+# }
 
 # Function to send status to API
 send_status() {
     local status=$1
     local success=0
 
+    # Determine endpoint based on location
+    local target_url_prod="$API_URL_PROD"
+    local target_url_staging="$API_URL_STAGING"
+    if [ "$LOCATION" != "home" ] && [ -n "$LOCATION" ]; then
+        target_url_prod="${API_URL_PROD%/}/$LOCATION"
+        target_url_staging="${API_URL_STAGING%/}/$LOCATION"
+    fi
+
     # Send to production
-    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_PROD" \
+    response=$(curl -s -w "\n%{http_code}" -X POST "$target_url_prod" \
         -H "Authorization: $API_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}")
@@ -58,14 +79,14 @@ send_status() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -eq 200 ]; then
-        log "${GREEN}✓${NC} [PROD] Status sent successfully: $status"
+        log "${GREEN}✓${NC} [PROD] Status sent successfully for $LOCATION: $status"
         success=1
     else
         log "${RED}✗${NC} [PROD] Failed to send status. HTTP code: $http_code, Response: $body"
     fi
 
     # Send to staging
-    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL_STAGING" \
+    response=$(curl -s -w "\n%{http_code}" -X POST "$target_url_staging" \
         -H "Authorization: $API_TOKEN" \
         -H "Content-Type: application/json" \
         -d "{\"status\": \"$status\"}")
@@ -74,7 +95,7 @@ send_status() {
     body=$(echo "$response" | sed '$d')
 
     if [ "$http_code" -eq 200 ]; then
-        log "${GREEN}✓${NC} [STAGING] Status sent successfully: $status"
+        log "${GREEN}✓${NC} [STAGING] Status sent successfully for $LOCATION: $status"
         success=1
     else
         log "${RED}✗${NC} [STAGING] Failed to send status. HTTP code: $http_code, Response: $body"
@@ -87,8 +108,8 @@ send_status() {
 # Main monitoring loop
 main() {
     log "${YELLOW}Starting host monitoring...${NC}"
-    log "Target IP (ping): $TARGET_IP"
-    log "Target UDR IP: $TARGET_UDR_IP"
+    log "Ping targets: $SMART_SOCKET_IP, $AC1_IP, $AC2_IP, $AC3_IP"
+    # log "Target UDR IP: $TARGET_UDR_IP"
     log "API (Production): $API_URL_PROD"
     log "API (Staging): $API_URL_STAGING"
     log "Check interval: ${CHECK_INTERVAL}s"
@@ -102,39 +123,17 @@ main() {
     consecutive_down=0
 
     while true; do
-        # Check both hosts
-        ping_result=false
-        udr_result=false
-
+        # Check ping targets
         if check_host; then
-            ping_result=true
-        fi
-
-        if check_udr_host; then
-            udr_result=true
-        fi
-
-        # At least one host must be reachable for UP status
-        # DOWN only when BOTH hosts are unreachable
-        if $ping_result || $udr_result; then
-            # At least one host is up - power is ON
             consecutive_up=$((consecutive_up + 1))
             consecutive_down=0
             status_text="${GREEN}UP${NC}"
-
-            if $ping_result && $udr_result; then
-                detail="(ping: UP, UDR: UP)"
-            elif $ping_result; then
-                detail="(ping: UP, UDR: DOWN)"
-            else
-                detail="(ping: DOWN, UDR: UP)"
-            fi
+            detail="(ping: UP)"
         else
-            # Both hosts are down - power is OFF
             consecutive_down=$((consecutive_down + 1))
             consecutive_up=0
             status_text="${RED}DOWN${NC}"
-            detail="(ping: DOWN, UDR: DOWN)"
+            detail="(ping: DOWN)"
         fi
 
         log "Hosts status: $status_text $detail (up: $consecutive_up, down: $consecutive_down)"
