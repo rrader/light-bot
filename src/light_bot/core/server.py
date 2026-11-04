@@ -476,16 +476,48 @@ def _handle_power_status_update(
             # Sustained if alert was explicitly fired OR duration was >= delay_seconds
             sustained_instability = unstable_alert_was_sent or (was_unstable and unstable_duration_sec >= unstable_alert_manager.delay_seconds)
 
-            if was_unstable and not sustained_instability:
-                # Voltage spike was truly short-lived (< delay_seconds) and alert was never sent:
-                # suppress Telegram message completely so user is not spammed.
+            # Check previous event before instability to know if light was OFF beforehand
+            prior_was_off = False
+            prior_off_timestamp = None
+            if was_unstable and stats_service:
+                try:
+                    # Fetch recent events for this location to see what was before 'unstable'
+                    recent_events = stats_service.get_recent_events(limit=5, location=loc.id)
+                    # Filter events older than last_ts (or skip the current unstable event)
+                    for ev in recent_events:
+                        ev_status = ev.status.lower()
+                        if ev_status == 'unstable':
+                            continue
+                        if ev_status == 'off':
+                            prior_was_off = True
+                            prior_off_timestamp = ev.timestamp
+                        break
+                except Exception as ex:
+                    logger.warning(f"Failed to check prior event for {loc.id}: {ex}")
+
+            if was_unstable and not sustained_instability and not prior_was_off:
+                # Voltage spike was truly short-lived (< delay_seconds) when power was already ON,
+                # and alert was never sent: suppress Telegram message so user is not spammed.
                 logger.info(
                     f"Short-lived voltage instability resolved for {loc.id} without notification "
                     f"(spike lasted {unstable_duration_sec:.1f}s < {unstable_alert_manager.delay_seconds}s)"
                 )
                 message = None
             else:
-                if was_unstable and (min_v is None or max_v is None) and stats_service and last_ts:
+                # If prior state was OFF, power actually came back after an outage (with a brief relay delay)!
+                # In that case, format duration based on the total outage time from prior_off_timestamp.
+                effective_was_unstable = was_unstable and sustained_instability
+                effective_duration_text = duration_text
+                if prior_was_off and prior_off_timestamp:
+                    try:
+                        if prior_off_timestamp.tzinfo is None:
+                            prior_off_timestamp = TIMEZONE.localize(prior_off_timestamp)
+                        outage_dur = now_ts - prior_off_timestamp
+                        effective_duration_text = DurationFormatter.format_duration(outage_dur)
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate full outage duration: {e}")
+
+                if effective_was_unstable and (min_v is None or max_v is None) and stats_service and last_ts:
                     db_min, db_max = stats_service.get_voltage_extrema(loc.id, since=last_ts)
                     if db_min is not None and min_v is None:
                         min_v = db_min
@@ -498,25 +530,25 @@ def _handle_power_status_update(
                     start_time, end_time, is_today = next_outage_info
                     message = PowerStatusFormatter.format_power_on_message(
                         timestamp,
-                        duration_text,
+                        effective_duration_text,
                         next_outage_start=start_time,
                         next_outage_end=end_time,
                         is_today=is_today,
                         location_name=loc_display_name,
                         voltage=voltage,
-                        was_unstable=was_unstable,
-                        min_voltage=min_v,
-                        max_voltage=max_v
+                        was_unstable=effective_was_unstable,
+                        min_voltage=min_v if effective_was_unstable else None,
+                        max_voltage=max_v if effective_was_unstable else None
                     )
                 else:
                     message = PowerStatusFormatter.format_power_on_message(
                         timestamp,
-                        duration_text,
+                        effective_duration_text,
                         location_name=loc_display_name,
                         voltage=voltage,
-                        was_unstable=was_unstable,
-                        min_voltage=min_v,
-                        max_voltage=max_v
+                        was_unstable=effective_was_unstable,
+                        min_voltage=min_v if effective_was_unstable else None,
+                        max_voltage=max_v if effective_was_unstable else None
                     )
         elif status == 'unstable':
             # Schedule delayed alert to filter out short-lived spikes;
