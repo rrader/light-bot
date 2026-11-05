@@ -130,8 +130,6 @@ class PowerStatusFormatter:
             else:
                 message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b>\n"
 
-        message += "⚠️ Реле напруги відімкнуло споживачів від мережі.\n"
-
         if duration_text:
             message += f"⏱ Попередній стан тривав: <b>{duration_text}</b>"
 

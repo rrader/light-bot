@@ -2,6 +2,7 @@ import json
 import pytest
 from datetime import datetime
 from unittest.mock import patch, AsyncMock
+from light_bot.formatters.power_status_formatter import PowerStatusFormatter
 
 
 @pytest.fixture
@@ -155,3 +156,12 @@ class TestVoltageAndRelayReporting:
         assert pub_data['before_relay'] is True
         assert pub_data['after_relay'] is True
         assert pub_data['source'] == 'ha'
+
+    def test_unstable_voltage_message_omits_relay_explanation(self):
+        message = PowerStatusFormatter.format_power_unstable_message(
+            datetime(2026, 11, 5, 4, 21, 20), voltage=272.0
+        )
+
+        assert "В мережі нестабільна напруга!" in message
+        assert "272.0 В" in message
+        assert "Реле напруги відімкнуло споживачів від мережі" not in message

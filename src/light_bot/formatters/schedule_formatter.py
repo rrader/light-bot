@@ -124,7 +124,6 @@ class ScheduleFormatter:
                 f"🚨 <b>ЕКСТРЕНІ ВІДКЛЮЧЕННЯ</b> 🚨\n\n"
                 f"🏠 Група: <b>{group}</b> ({city_name})\n"
                 f"📅 {weekday}, {date_str}\n\n"
-                f"⚠️ <b>Графіки не застосовуються</b>\n\n"
                 f"🕐 Оновлено: {datetime.now(TIMEZONE).strftime('%H:%M:%S')}\n\n"
                 f"{footer}"
             )

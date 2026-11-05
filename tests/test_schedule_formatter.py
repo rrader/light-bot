@@ -57,3 +57,22 @@ class TestScheduleFormatterTotalDuration:
         assert "Планові відключення:" in msg
         assert "⚡️ 08:00 - 12:00" in msg
         assert "⌛️ Всього без світла: <b>4 години</b>" in msg
+
+    def test_emergency_shutdown_message_omits_schedule_warning(self):
+        today = DaySchedule(
+            slots=[], date=datetime(2026, 11, 5, tzinfo=timezone.utc),
+            status=ScheduleStatus.EMERGENCY_SHUTDOWNS,
+        )
+        tomorrow = DaySchedule(
+            slots=[], date=datetime(2026, 11, 6, tzinfo=timezone.utc),
+            status=ScheduleStatus.WAITING_FOR_SCHEDULE,
+        )
+        response = YasnoScheduleResponse({
+            "2.1": GroupSchedule(today=today, tomorrow=tomorrow, updatedOn=datetime.now(timezone.utc))
+        })
+
+        message = ScheduleFormatter.format_schedule_message(response, "2.1", city="vinnytsia")
+
+        assert "🚨 <b>ЕКСТРЕНІ ВІДКЛЮЧЕННЯ</b> 🚨" in message
+        assert "Графіки не застосовуються" not in message
+        assert "Оновлено:" in message
