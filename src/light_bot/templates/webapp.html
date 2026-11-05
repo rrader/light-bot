@@ -592,9 +592,9 @@
             <!-- Live Voltage & Telemetry -->
             <div class="telemetry-row">
                 <span class="pill" id="voltagePill">⚡️ Напруга: <b id="voltageVal">-- В</b></span>
-                <span class="separator">•</span>
-                <span class="pill" id="relayPill">Реле: <b id="relayVal">--</b></span>
-                <span class="separator">•</span>
+                <span class="separator" id="relaySeparatorBefore" style="display: none;">•</span>
+                <span class="pill" id="relayPill" style="display: none;">Реле: <b id="relayVal">--</b></span>
+                <span class="separator" id="relaySeparatorAfter" style="display: none;">•</span>
                 <span class="pill" id="updatedPill">Оновлено: <b id="updatedVal">щойно</b></span>
             </div>
 
@@ -927,8 +927,20 @@
                 document.getElementById('voltageVal').textContent = '-- В';
             }
 
-            // Relay state
-            if (statusInfo.before_relay !== undefined && statusInfo.after_relay !== undefined) {
+            // Show relay state only when the source provides both relay readings.
+            const hasRelayTelemetry = statusInfo.before_relay !== undefined && statusInfo.before_relay !== null &&
+                statusInfo.after_relay !== undefined && statusInfo.after_relay !== null;
+            const relayPill = document.getElementById('relayPill');
+            const relaySeparators = [
+                document.getElementById('relaySeparatorBefore'),
+                document.getElementById('relaySeparatorAfter')
+            ];
+            relayPill.style.display = hasRelayTelemetry ? '' : 'none';
+            relaySeparators.forEach(separator => {
+                separator.style.display = hasRelayTelemetry ? '' : 'none';
+            });
+
+            if (hasRelayTelemetry) {
                 const relayEl = document.getElementById('relayVal');
                 if (statusInfo.after_relay) {
                     relayEl.textContent = 'увімкнено';
@@ -940,10 +952,6 @@
                     relayEl.textContent = 'знеструмлено';
                     relayEl.style.color = 'var(--red)';
                 }
-            } else {
-                const relayEl = document.getElementById('relayVal');
-                relayEl.textContent = (status === 'on' ? 'норма' : 'відключено');
-                relayEl.style.color = (status === 'on' ? 'var(--green)' : 'var(--red)');
             }
 
             // Relative updated time: kept updated by tickSyncBadge() based on lastSyncTime
