@@ -502,6 +502,7 @@ def _handle_power_status_update(
             # Sustained if alert was explicitly fired OR duration was >= delay_seconds
             sustained_instability = unstable_alert_was_sent or (was_unstable and unstable_duration_sec >= unstable_alert_manager.delay_seconds)
             sustained_outage = outage_alert_was_sent or (was_off and off_duration_sec >= outage_alert_manager.delay_seconds)
+            effective_was_unstable = was_unstable and sustained_instability
 
             # Check previous event before instability to know if light was OFF beforehand
             prior_was_off = False
