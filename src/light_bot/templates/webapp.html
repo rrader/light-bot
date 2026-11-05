@@ -404,8 +404,6 @@
             background: #facc15;
             background: linear-gradient(180deg, #fef08a 0%, #eab308 50%, #ca8a04 100%);
             box-shadow: 0 0 8px 1px rgba(250, 204, 21, 0.85);
-            min-width: 6px;
-            flex-shrink: 0;
             cursor: pointer;
             z-index: 9;
             border-radius: 1px;
@@ -724,7 +722,8 @@
             const parts = kyivTimeStr.split(':');
             const hours = parseInt(parts[0], 10);
             const minutes = parseInt(parts[1], 10);
-            const totalMinutes = (hours * 60) + minutes;
+            const seconds = parseInt(parts[2], 10) || 0;
+            const totalMinutes = (hours * 60) + minutes + seconds / 60;
             const pct = (totalMinutes / 1440) * 100;
             const cursorEl = document.getElementById('timelineCursor');
             if (cursorEl) {
@@ -997,7 +996,7 @@
             const now = new Date();
             const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
             const parts = kyivTimeStr.split(':');
-            const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10);
+            const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10) + (parseInt(parts[2], 10) || 0) / 60;
 
             // ==========================================
             // 1. TOP TRACK: SCHEDULE
@@ -1252,10 +1251,10 @@
                     const nextDate = nextEv ? nextEv.rawDate : now;
                     const durSec = Math.max(1, Math.round((nextDate - ev.rawDate) / 1000));
 
-                    if (nextMins > ev.mins || ev.status === 'unstable') {
+                    if (nextMins > ev.mins) {
                         intervals.push({
                             start: ev.mins,
-                            end: Math.max(nextMins, ev.mins + 0.1),
+                            end: Math.min(currentMins, nextMins),
                             startDate: ev.rawDate,
                             endDate: nextDate,
                             durationSec: durSec,
