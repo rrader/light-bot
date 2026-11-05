@@ -76,3 +76,16 @@ class TestScheduleFormatterTotalDuration:
         assert "🚨 <b>ЕКСТРЕНІ ВІДКЛЮЧЕННЯ</b> 🚨" in message
         assert "Графіки не застосовуються" not in message
         assert "Оновлено:" in message
+
+    def test_outage_warning_omits_lift_and_charging_advice(self):
+        message = ScheduleFormatter.format_outage_warning_message(
+            datetime(2026, 11, 5, 15, 0, tzinfo=timezone.utc),
+            datetime(2026, 11, 5, 17, 0, tzinfo=timezone.utc),
+            "2.1",
+            city="vinnytsia",
+        )
+
+        assert "Наближається відключення за 30 хвилин" in message
+        assert "Час відключення:</b> 15:00" in message
+        assert "Заплановане включення:</b> 17:00" in message
+        assert "З обережністю користуйтесь ліфтами та зарядіть пристрої" not in message

@@ -193,7 +193,6 @@ class ScheduleFormatter:
             f"🏠 Група: <b>{group}</b> ({city_name})\n\n"
             f"<b>Час відключення:</b> {start_str}\n"
             f"<b>Заплановане включення:</b> {end_str}\n\n"
-            f"⚡️ З обережністю користуйтесь ліфтами та зарядіть пристрої\n\n"
             f"🕐 Надіслано: {now.strftime('%H:%M:%S')}\n\n"
             f"{footer}"
         )
