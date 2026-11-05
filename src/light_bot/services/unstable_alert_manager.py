@@ -93,6 +93,8 @@ class UnstableAlertManager:
             stabilization_timer = self._stabilization_timers.pop(location_id, None)
             if stabilization_timer:
                 stabilization_timer.cancel()
+            if self.stats_service and hasattr(self.stats_service, 'remove_pending_stabilization_alert'):
+                self.stats_service.remove_pending_stabilization_alert(location_id)
 
             # 1. Track this cutoff in event history
             history = self._unstable_history.setdefault(location_id, [])
@@ -171,31 +173,84 @@ class UnstableAlertManager:
         location,
         voltage: Optional[float] = None,
         min_voltage: Optional[float] = None,
-        max_voltage: Optional[float] = None
+        max_voltage: Optional[float] = None,
+        timestamp: Optional[datetime] = None
     ):
         """Send a recovery notice only after power remains stable for one hour."""
         location_id = location.id
+        recovery_timestamp = timestamp or _now()
+        due_timestamp = recovery_timestamp + timedelta(seconds=self.stabilization_seconds)
         with self._lock:
             old_timer = self._stabilization_timers.pop(location_id, None)
             if old_timer:
                 old_timer.cancel()
-
-            timer = threading.Timer(
-                self.stabilization_seconds,
-                self._on_stabilization_timer_fired,
-                args=(location, voltage, min_voltage, max_voltage)
+            self._persist_stabilization(
+                location_id, recovery_timestamp, due_timestamp,
+                voltage, min_voltage, max_voltage
             )
-            timer.daemon = True
-            self._stabilization_timers[location_id] = timer
-            timer.start()
+            self._start_stabilization_timer(
+                location, recovery_timestamp, due_timestamp,
+                voltage, min_voltage, max_voltage
+            )
         logger.info(
             f"Scheduled stabilization notice for {location_id} after "
             f"{self.stabilization_seconds}s without instability"
         )
 
+    def _persist_stabilization(
+        self, location_id, recovery_timestamp, due_timestamp, voltage, min_voltage, max_voltage
+    ):
+        if self.stats_service and hasattr(self.stats_service, 'save_pending_stabilization_alert'):
+            self.stats_service.save_pending_stabilization_alert(
+                location_id, recovery_timestamp, due_timestamp,
+                voltage, min_voltage, max_voltage
+            )
+
+    def _start_stabilization_timer(
+        self, location, recovery_timestamp, due_timestamp, voltage, min_voltage, max_voltage
+    ):
+        remaining_seconds = max(0.0, (due_timestamp - _now()).total_seconds())
+        timer = threading.Timer(
+            remaining_seconds,
+            self._on_stabilization_timer_fired,
+            args=(location, recovery_timestamp, voltage, min_voltage, max_voltage)
+        )
+        timer.daemon = True
+        self._stabilization_timers[location.id] = timer
+        timer.start()
+
+    def restore_pending_stabilization_alerts(self, locations):
+        """Rebuild in-memory timers from SQLite after a process/container restart."""
+        if not self.stats_service or not hasattr(self.stats_service, 'get_pending_stabilization_alerts'):
+            return
+        for pending in self.stats_service.get_pending_stabilization_alerts():
+            location_id = pending['location']
+            location = locations.get(location_id) if isinstance(locations, dict) else None
+            if not location:
+                self.stats_service.remove_pending_stabilization_alert(location_id)
+                continue
+            recovery_timestamp = pending['recovery_timestamp']
+            if not self.stats_service.is_current_stabilization(location_id, recovery_timestamp):
+                self.stats_service.remove_pending_stabilization_alert(location_id)
+                continue
+            with self._lock:
+                self._start_stabilization_timer(
+                    location,
+                    recovery_timestamp,
+                    pending['due_timestamp'],
+                    pending['voltage'],
+                    pending['min_voltage'],
+                    pending['max_voltage'],
+                )
+            logger.info(
+                f"Restored stabilization notice for {location_id}; "
+                f"remaining {(pending['due_timestamp'] - _now()).total_seconds():.0f}s"
+            )
+
     def _on_stabilization_timer_fired(
         self,
         location,
+        recovery_timestamp: datetime,
         voltage: Optional[float],
         min_voltage: Optional[float],
         max_voltage: Optional[float]
@@ -203,6 +258,12 @@ class UnstableAlertManager:
         location_id = location.id
         with self._lock:
             self._stabilization_timers.pop(location_id, None)
+
+        if self.stats_service and hasattr(self.stats_service, 'is_current_stabilization'):
+            if not self.stats_service.is_current_stabilization(location_id, recovery_timestamp):
+                self.stats_service.remove_pending_stabilization_alert(location_id)
+                logger.info(f"Skipping stale stabilization notice for {location_id}")
+                return
 
         message = PowerStatusFormatter.format_power_on_message(
             _now(),
@@ -216,7 +277,17 @@ class UnstableAlertManager:
         target_chat = location.channel_id or (bot.channel_id if bot else None)
         keyboard = get_webapp_inline_keyboard(location_id)
         logger.info(f"Power remained stable for one hour at {location_id}; sending recovery notice")
-        self._send_telegram(message, target_chat, reply_markup=keyboard)
+        delivered = self._send_telegram(message, target_chat, reply_markup=keyboard)
+        if delivered and self.stats_service and hasattr(self.stats_service, 'remove_pending_stabilization_alert'):
+            self.stats_service.remove_pending_stabilization_alert(location_id)
+        elif not delivered and self.stats_service and hasattr(self.stats_service, 'get_pending_stabilization_alerts'):
+            retry_at = _now() + timedelta(seconds=60)
+            with self._lock:
+                self._start_stabilization_timer(
+                    location, recovery_timestamp, retry_at,
+                    voltage, min_voltage, max_voltage
+                )
+            logger.warning(f"Will retry stabilization notice for {location_id} in 60s")
 
     def cancel_stabilization_alert(self, location_id: str):
         """Cancel a pending recovery notice when instability resumes."""
@@ -224,6 +295,8 @@ class UnstableAlertManager:
             timer = self._stabilization_timers.pop(location_id, None)
             if timer:
                 timer.cancel()
+            if self.stats_service and hasattr(self.stats_service, 'remove_pending_stabilization_alert'):
+                self.stats_service.remove_pending_stabilization_alert(location_id)
 
     def _send_frequent_alert(
         self,
@@ -388,7 +461,7 @@ class UnstableAlertManager:
         bot = self._get_bot()
         if not bot:
             logger.warning("No telegram bot configured for unstable alert manager")
-            return
+            return False
         try:
             try:
                 loop = asyncio.get_event_loop()
@@ -402,5 +475,7 @@ class UnstableAlertManager:
             loop.run_until_complete(
                 bot.send_message(message, chat_id=chat_id, reply_markup=reply_markup)
             )
+            return True
         except Exception as e:
             logger.error(f"Failed to send delayed unstable alert to Telegram: {e}")
+            return False

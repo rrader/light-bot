@@ -54,6 +54,7 @@ class EventLedger:
     def __init__(self):
         self.events = []
         self.readings = []
+        self.pending_stabilization = {}
 
     def record_reading(self, **data):
         if data.get("voltage") is not None:
@@ -82,6 +83,31 @@ class EventLedger:
             and (since is None or reading["timestamp"] >= since)
         ]
         return (min(values), max(values)) if values else (None, None)
+
+    def save_pending_stabilization_alert(
+        self, location, recovery_timestamp, due_timestamp, voltage, min_voltage, max_voltage
+    ):
+        self.pending_stabilization[location] = {
+            "location": location,
+            "recovery_timestamp": recovery_timestamp,
+            "due_timestamp": due_timestamp,
+            "voltage": voltage,
+            "min_voltage": min_voltage,
+            "max_voltage": max_voltage,
+        }
+        return True
+
+    def get_pending_stabilization_alerts(self):
+        return list(self.pending_stabilization.values())
+
+    def is_current_stabilization(self, location, recovery_timestamp):
+        current = next((event for event in self.events if event.location == location), None)
+        return bool(
+            current and current.status == "on" and current.timestamp == recovery_timestamp
+        )
+
+    def remove_pending_stabilization_alert(self, location):
+        self.pending_stabilization.pop(location, None)
 
 
 @pytest.fixture
@@ -395,3 +421,91 @@ def test_kyiv_replays_all_production_events_from_2026_11_04(replay):
     assert "04.11.2026 23:37:20" in messages[3]
     assert all(call.kwargs.get("chat_id") in (None, "@kyiv_test_channel")
                for call in replay.bot.send_message.call_args_list)
+
+
+def test_stabilization_deadline_survives_restart_and_resumes_remaining_time(replay, monkeypatch):
+    """A container restart during the stable hour restores the original deadline."""
+    recovery = at("2026-11-05T04:25:40.128139+02:00")
+    seed_state(
+        replay, "home", "on", at("2026-11-05T03:34:00.117174+02:00"),
+        voltage=253.0, before_relay=True, after_relay=True, source="ha",
+    )
+    unstable_start = at("2026-11-05T04:21:20.120703+02:00")
+    post_status(
+        replay, "home", unstable_start, "unstable", voltage=271.0,
+        before_relay=True, after_relay=False, source="ha",
+    )
+    replay.ledger.record_reading(
+        timestamp=at("2026-11-05T04:22:00.120703+02:00"), location="home", voltage=262.0
+    )
+    replay.server.unstable_alert_manager.record_voltage("home", 262.0)
+    replay.ledger.record_reading(
+        timestamp=at("2026-11-05T04:23:00.120703+02:00"), location="home", voltage=272.0
+    )
+    replay.server.unstable_alert_manager.record_voltage("home", 272.0)
+    unstable_timer = next(t for t in replay.timers if t.interval == 180)
+    replay.clock.current = at("2026-11-05T04:24:20.120703+02:00")
+    unstable_timer.fire()
+    post_status(
+        replay, "home", recovery, "on", voltage=253.0,
+        before_relay=True, after_relay=True, source="ha",
+    )
+    assert replay.ledger.pending_stabilization["home"]["due_timestamp"] == at(
+        "2026-11-05T05:25:40.128139+02:00"
+    )
+
+    # Simulate a restart at 04:37:43; a fresh manager reconstructs the timer from SQLite.
+    replay.clock.current = at("2026-11-05T04:37:43+02:00")
+    for old_timer in replay.timers:
+        old_timer.cancel()
+    restarted_manager = unstable_module.UnstableAlertManager(
+        delay_seconds=180,
+        telegram_bot=replay.bot,
+        stats_service=replay.ledger,
+        stabilization_seconds=3600,
+    )
+    monkeypatch.setattr(replay.server, "unstable_alert_manager", restarted_manager)
+    restarted_manager.restore_pending_stabilization_alerts(replay.locations)
+    restored_timer = replay.timers[-1]
+    assert restored_timer.interval == pytest.approx(2877.128139)
+    assert restored_timer.started is True
+
+    replay.clock.current = at("2026-11-05T05:25:40.128139+02:00")
+    restored_timer.fire()
+    assert "Напруга стабілізувалась!" in sent_messages(replay)[-1]
+    assert "05.11.2026 05:25:40" in sent_messages(replay)[-1]
+    assert "253.0–272.0 В" in sent_messages(replay)[-1]
+    assert "home" not in replay.ledger.pending_stabilization
+
+
+def test_new_instability_cancels_persisted_stabilization_after_restart(replay, monkeypatch):
+    """An unstable event invalidates both a restored timer and its persisted deadline."""
+    recovery = at("2026-11-05T04:25:40.128139+02:00")
+    seed_state(
+        replay, "home", "unstable", at("2026-11-05T04:21:20.120703+02:00"),
+        voltage=271.0, before_relay=True, after_relay=False, source="ha",
+    )
+    post_status(
+        replay, "home", recovery, "on", voltage=253.0,
+        before_relay=True, after_relay=True, source="ha",
+    )
+    replay.clock.current = at("2026-11-05T04:40:00+02:00")
+    for old_timer in replay.timers:
+        old_timer.cancel()
+    restarted_manager = unstable_module.UnstableAlertManager(
+        delay_seconds=180, telegram_bot=replay.bot, stats_service=replay.ledger,
+        stabilization_seconds=3600,
+    )
+    monkeypatch.setattr(replay.server, "unstable_alert_manager", restarted_manager)
+    restarted_manager.restore_pending_stabilization_alerts(replay.locations)
+    timer = replay.timers[-1]
+
+    post_status(
+        replay, "home", at("2026-11-05T04:40:01+02:00"), "unstable",
+        voltage=260.0, before_relay=True, after_relay=False, source="ha",
+    )
+    assert timer.cancelled is True
+    assert "home" not in replay.ledger.pending_stabilization
+    replay.clock.current = at("2026-11-05T05:25:40.128139+02:00")
+    timer.fire()
+    assert all("Напруга стабілізувалась!" not in message for message in sent_messages(replay))

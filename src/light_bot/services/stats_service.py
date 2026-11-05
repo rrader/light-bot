@@ -89,6 +89,16 @@ class StatsService:
                         updated_at TEXT NOT NULL
                     )
                 ''')
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS pending_stabilization_alerts (
+                        location TEXT PRIMARY KEY,
+                        recovery_timestamp TEXT NOT NULL,
+                        due_timestamp TEXT NOT NULL,
+                        voltage REAL,
+                        min_voltage REAL,
+                        max_voltage REAL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -229,6 +239,83 @@ class StatsService:
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to record voltage reading: {e}")
+
+    def save_pending_stabilization_alert(
+        self, location: str, recovery_timestamp: datetime, due_timestamp: datetime,
+        voltage: Optional[float], min_voltage: Optional[float], max_voltage: Optional[float]
+    ):
+        """Persist a one-hour stability deadline so it survives process restarts."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    '''INSERT INTO pending_stabilization_alerts
+                       (location, recovery_timestamp, due_timestamp, voltage, min_voltage, max_voltage)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(location) DO UPDATE SET
+                         recovery_timestamp = excluded.recovery_timestamp,
+                         due_timestamp = excluded.due_timestamp,
+                         voltage = excluded.voltage,
+                         min_voltage = excluded.min_voltage,
+                         max_voltage = excluded.max_voltage''',
+                    (location, recovery_timestamp.isoformat(), due_timestamp.isoformat(),
+                     voltage, min_voltage, max_voltage),
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to persist stabilization alert for {location}: {e}")
+            return False
+
+    def get_pending_stabilization_alerts(self) -> List[Dict[str, Any]]:
+        """Load uncompleted stability deadlines for timer restoration after startup."""
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    '''SELECT location, recovery_timestamp, due_timestamp, voltage, min_voltage, max_voltage
+                       FROM pending_stabilization_alerts'''
+                ).fetchall()
+            return [
+                {
+                    "location": row[0],
+                    "recovery_timestamp": datetime.fromisoformat(row[1]),
+                    "due_timestamp": datetime.fromisoformat(row[2]),
+                    "voltage": row[3],
+                    "min_voltage": row[4],
+                    "max_voltage": row[5],
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"Failed to load pending stabilization alerts: {e}")
+            return []
+
+    def is_current_stabilization(self, location: str, recovery_timestamp: datetime) -> bool:
+        """Ensure no off/unstable transition superseded the recovery event."""
+        try:
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    '''SELECT status, timestamp FROM power_events
+                       WHERE location = ? ORDER BY id DESC LIMIT 1''',
+                    (location,),
+                ).fetchone()
+            return bool(
+                row and row[0] == "on"
+                and datetime.fromisoformat(row[1]) == recovery_timestamp
+            )
+        except Exception as e:
+            logger.error(f"Failed to validate pending stabilization for {location}: {e}")
+            return False
+
+    def remove_pending_stabilization_alert(self, location: str):
+        """Remove a completed or superseded stability deadline."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    'DELETE FROM pending_stabilization_alerts WHERE location = ?', (location,)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to remove pending stabilization alert for {location}: {e}")
 
     def get_voltage_extrema(
         self,

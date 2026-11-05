@@ -33,6 +33,32 @@ def test_record_event(stats_service):
     # The service stores as ISO string, so we check if it comes back correctly
     assert abs((events[0].timestamp - now).total_seconds()) < 1
 
+
+def test_pending_stabilization_is_persisted_and_invalidated_by_new_event(stats_service):
+    recovery = TIMEZONE.localize(datetime(2026, 11, 5, 4, 25, 40))
+    due = recovery + timedelta(hours=1)
+    stats_service.record_event('on', recovery, location='home', voltage=253.0)
+
+    assert stats_service.save_pending_stabilization_alert(
+        'home', recovery, due, 253.0, 253.0, 272.0
+    ) is True
+    pending = stats_service.get_pending_stabilization_alerts()
+    assert len(pending) == 1
+    assert pending[0] == {
+        'location': 'home',
+        'recovery_timestamp': recovery,
+        'due_timestamp': due,
+        'voltage': 253.0,
+        'min_voltage': 253.0,
+        'max_voltage': 272.0,
+    }
+    assert stats_service.is_current_stabilization('home', recovery) is True
+
+    stats_service.record_event('unstable', recovery + timedelta(minutes=20), location='home')
+    assert stats_service.is_current_stabilization('home', recovery) is False
+    stats_service.remove_pending_stabilization_alert('home')
+    assert stats_service.get_pending_stabilization_alerts() == []
+
 def test_get_recent_events_limit(stats_service):
     now = datetime.now(TIMEZONE)
     for i in range(15):

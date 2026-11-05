@@ -46,6 +46,7 @@ unstable_alert_manager = UnstableAlertManager(
     frequent_cooldown_seconds=UNSTABLE_FREQUENT_COOLDOWN_SECONDS,
     stabilization_seconds=UNSTABLE_STABILIZATION_SECONDS
 )
+unstable_alert_manager.restore_pending_stabilization_alerts(LOCATIONS)
 outage_alert_manager = OutageAlertManager(
     delay_seconds=OUTAGE_NOTIFICATION_DELAY_SECONDS
 )
@@ -552,7 +553,8 @@ def _handle_power_status_update(
                     loc,
                     voltage=voltage,
                     min_voltage=min_v,
-                    max_voltage=max_v
+                    max_voltage=max_v,
+                    timestamp=now_ts,
                 )
                 message = None
             elif was_unstable and not sustained_instability and not prior_was_off:
