@@ -65,6 +65,7 @@ class GroupScheduleSender:
         # Optional AI explainer
         ai_explainer=None,
         stats_service: Optional[StatsService] = None,
+        schedule_change_debounce_seconds: int = 480,
         group: Optional[str] = None,
         city: Optional[str] = None,
         **kwargs
@@ -122,6 +123,13 @@ class GroupScheduleSender:
 
         # AI explainer
         self.ai_explainer = ai_explainer
+        self.schedule_change_debounce_seconds = schedule_change_debounce_seconds
+        self._pending_today_schedule_task: Optional[asyncio.Task] = None
+        self._pending_today_baseline: Optional[dict] = None
+        self._pending_today_data: Optional[YasnoScheduleResponse] = None
+        self._pending_today_dict: Optional[dict] = None
+        self._pending_today_hash: Optional[str] = None
+        self._pending_today_generation = 0
 
         # Load state from files
         self.last_today_hash = self._read_hash_file(self.today_hash_file)
@@ -308,15 +316,15 @@ class GroupScheduleSender:
             current_time_minutes: Current time in minutes since midnight (0-1439)
 
         Returns:
-            True if there are changes in future/current slots or status changed,
-            False if only past slots changed
+            True for emergency-status transitions or changed future/current slots,
+            False for technical changes and changes limited to past slots.
         """
         try:
-            # Status change is always meaningful (e.g., EmergencyShutdowns)
+            # Emergency shutdown activation/cancellation is urgent even if slots match.
             old_status = old_schedule_dict.get('status')
             new_status = new_schedule_dict.get('status')
-            if old_status != new_status:
-                logger.info(f"[{self.group_config.group}] Status changed from {old_status} to {new_status} - meaningful change")
+            if old_status != new_status and "EmergencyShutdowns" in (old_status, new_status):
+                logger.info(f"[{self.group_config.group}] Emergency status changed - meaningful change")
                 return True
 
             old_slots = old_schedule_dict.get('slots', [])
@@ -351,6 +359,124 @@ class GroupScheduleSender:
             # On error, default to meaningful (safer to notify)
             return True
 
+    @property
+    def has_pending_schedule_notification(self) -> bool:
+        return self._pending_today_data is not None and self._pending_today_baseline is not None
+
+    def _store_today_snapshot(self, schedule_dict: dict, schedule_hash: str) -> None:
+        self._write_schedule_data_file(self.today_data_file, schedule_dict)
+        self.last_today_hash = schedule_hash
+        self._write_hash_file(self.today_hash_file, schedule_hash)
+
+    def _cancel_pending_today_notification(self) -> None:
+        task = self._pending_today_schedule_task
+        try:
+            current_task = asyncio.current_task()
+        except RuntimeError:
+            current_task = None
+        if task and not task.done() and task is not current_task:
+            task.cancel()
+        self._pending_today_schedule_task = None
+        self._pending_today_baseline = None
+        self._pending_today_data = None
+        self._pending_today_dict = None
+        self._pending_today_hash = None
+        self._pending_today_generation += 1
+
+    async def _schedule_change_explanation(self, old_schedule: Optional[dict], new_schedule: dict) -> Optional[str]:
+        if not self.ai_explainer or not old_schedule:
+            return None
+        if old_schedule.get("status") == "EmergencyShutdowns" and new_schedule.get("status") != "EmergencyShutdowns":
+            return "Екстренні відключення були скасовані"
+        try:
+            now = datetime.now(TIMEZONE)
+            return await self.ai_explainer.explain_schedule_change(
+                old_schedule,
+                new_schedule,
+                now.hour * 60 + now.minute,
+            )
+        except Exception as e:
+            logger.warning(f"[{self.group_config.group}] Failed to explain schedule change: {e}")
+            return None
+
+    def _queue_today_schedule_notification(
+        self, schedule_data: YasnoScheduleResponse, schedule_dict: dict,
+        schedule_hash: str, baseline: dict
+    ) -> None:
+        if self._pending_today_baseline is None:
+            self._pending_today_baseline = baseline
+        if self._pending_today_hash == schedule_hash:
+            self._pending_today_data = schedule_data
+            self._pending_today_dict = schedule_dict
+            if not self._pending_today_schedule_task or self._pending_today_schedule_task.done():
+                self._pending_today_schedule_task = asyncio.create_task(
+                    self._send_pending_today_schedule()
+                )
+            return
+
+        self._pending_today_data = schedule_data
+        self._pending_today_dict = schedule_dict
+        self._pending_today_hash = schedule_hash
+        self._pending_today_generation += 1
+        if not self._pending_today_schedule_task or self._pending_today_schedule_task.done():
+            self._pending_today_schedule_task = asyncio.create_task(
+                self._send_pending_today_schedule()
+            )
+        logger.info(
+            f"[{self.group_config.group}] Coalescing schedule changes for "
+            f"{self.schedule_change_debounce_seconds}s"
+        )
+
+    async def _send_pending_today_schedule(self) -> None:
+        try:
+            await asyncio.sleep(self.schedule_change_debounce_seconds)
+            generation = self._pending_today_generation
+            schedule_data = self._pending_today_data
+            schedule_dict = self._pending_today_dict
+            schedule_hash = self._pending_today_hash
+            baseline = self._pending_today_baseline
+            if not schedule_data or not schedule_dict or not schedule_hash:
+                self._pending_today_schedule_task = None
+                return
+
+            explanation = await self._schedule_change_explanation(baseline, schedule_dict)
+            sent = await self.send_schedule(
+                schedule_data,
+                for_tomorrow=False,
+                change_detected=True,
+                change_explanation=explanation,
+            )
+            if not sent:
+                self._pending_today_schedule_task = None
+                return
+
+            self._store_today_snapshot(schedule_dict, schedule_hash)
+            if generation == self._pending_today_generation:
+                self._cancel_pending_today_notification()
+                return
+
+            # A new version arrived while Telegram was sending. Use the just-sent
+            # schedule as the baseline for one more coalesced update if needed.
+            latest_dict = self._pending_today_dict
+            latest_hash = self._pending_today_hash
+            now = datetime.now(TIMEZONE)
+            current_minutes = now.hour * 60 + now.minute
+            if latest_dict and latest_hash and self._has_meaningful_changes(
+                schedule_dict, latest_dict, current_minutes
+            ):
+                self._pending_today_baseline = schedule_dict
+                self._pending_today_schedule_task = asyncio.create_task(
+                    self._send_pending_today_schedule()
+                )
+            elif latest_dict and latest_hash:
+                self._store_today_snapshot(latest_dict, latest_hash)
+                self._cancel_pending_today_notification()
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.error(f"[{self.group_config.group}] Debounced schedule update failed: {e}")
+            self._pending_today_schedule_task = None
+
     # ========== Midnight Rollover ==========
 
     def perform_midnight_rollover(self) -> None:
@@ -364,6 +490,7 @@ class GroupScheduleSender:
             OSError: If critical file operations fail
         """
         try:
+            self._cancel_pending_today_notification()
             # Step 1: Delete today's hash and data files (yesterday is gone)
             safe_remove(self.today_hash_file, critical=True)
             logger.info(f"[{self.group_config.group}] Deleted today's hash file (yesterday)")
@@ -538,61 +665,65 @@ class GroupScheduleSender:
             schedule_dict = self._serialize_day_schedule(schedule_data, for_tomorrow=False)
             if not schedule_dict:
                 logger.warning(f"[{self.group_config.group}] Failed to serialize today's schedule data")
+                return
 
-            # Compare with last known hash
+            # Without a known baseline, publish the initial schedule immediately.
             if not self.last_today_hash:
-                # No hash file exists - send today's schedule (morning case)
                 logger.info(f"[{self.group_config.group}] No today hash found - sending today's schedule")
-                await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=False)
-                # Write data file first, then hash file
-                if schedule_dict:
-                    self._write_schedule_data_file(self.today_data_file, schedule_dict)
-                self.last_today_hash = current_hash
-                self._write_hash_file(self.today_hash_file, current_hash)
-            elif current_hash != self.last_today_hash:
-                logger.info(f"[{self.group_config.group}] Today's schedule changed! Old: {self.last_today_hash[:8]}, New: {current_hash[:8]}")
+                if await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=False):
+                    self._store_today_snapshot(schedule_dict, current_hash)
+                return
 
-                # Check if changes are meaningful
-                should_notify = True
-                old_schedule_dict = self._read_schedule_data_file(self.today_data_file)
-
-                if old_schedule_dict and schedule_dict:
-                    now = datetime.now(TIMEZONE)
-                    current_minutes = now.hour * 60 + now.minute
-                    is_meaningful = self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
-                else:
-                    logger.info(f"[{self.group_config.group}] No old schedule data available - will notify")
-
-                # Send notification only if changes are meaningful
-                if is_meaningful:
-                    # Generate explanation if available
-                    ai_explanation = None
-                    if self.ai_explainer and old_schedule_dict:
-                        if old_schedule_dict.get("status") == "EmergencyShutdowns" and schedule_dict.get("status") != "EmergencyShutdowns":
-                            ai_explanation = "Екстренні відключення були скасовані"
-                        else:
-                            try:
-                                now = datetime.now(TIMEZONE)
-                                current_minutes = now.hour * 60 + now.minute
-                                ai_explanation = await self.ai_explainer.explain_schedule_change(
-                                    old_schedule_dict,
-                                    schedule_dict,
-                                    current_minutes
-                                )
-                            except Exception as e:
-                                logger.warning(f"[{self.group_config.group}] Failed to generate AI explanation: {e}")
-                else:
-                    ai_explanation = r"¯\_(ツ)_/¯ змінили час минулих відключень, тому зміни не впливають на графік"
-
-                await self.send_schedule(schedule_data, for_tomorrow=False, change_detected=True, change_explanation=ai_explanation)
-
-                # ALWAYS update stored schedule data and hash
-                if schedule_dict:
-                    self._write_schedule_data_file(self.today_data_file, schedule_dict)
-                self.last_today_hash = current_hash
-                self._write_hash_file(self.today_hash_file, current_hash)
-            else:
+            # Keep the original baseline until the coalesced update is sent. This
+            # also lets a restarted process rediscover an unsent change from disk.
+            old_schedule_dict = self._pending_today_baseline or self._read_schedule_data_file(self.today_data_file)
+            if current_hash == self.last_today_hash and not self.has_pending_schedule_notification:
                 logger.debug(f"[{self.group_config.group}] Today's schedule unchanged")
+                return
+
+            logger.info(
+                f"[{self.group_config.group}] Checking changed schedule against its baseline "
+                f"({self.last_today_hash[:8]} -> {current_hash[:8]})"
+            )
+            now = datetime.now(TIMEZONE)
+            current_minutes = now.hour * 60 + now.minute
+            is_meaningful = (
+                not old_schedule_dict
+                or self._has_meaningful_changes(old_schedule_dict, schedule_dict, current_minutes)
+            )
+
+            if not is_meaningful:
+                logger.info(f"[{self.group_config.group}] Ignoring changes that affect only past slots")
+                if self.has_pending_schedule_notification:
+                    self._cancel_pending_today_notification()
+                self._store_today_snapshot(schedule_dict, current_hash)
+                return
+
+            old_status = old_schedule_dict.get("status") if old_schedule_dict else None
+            new_status = schedule_dict.get("status")
+            emergency_transition = (
+                old_status != new_status
+                and "EmergencyShutdowns" in (old_status, new_status)
+            )
+
+            if emergency_transition:
+                self._cancel_pending_today_notification()
+                explanation = await self._schedule_change_explanation(old_schedule_dict, schedule_dict)
+                if await self.send_schedule(
+                    schedule_data,
+                    for_tomorrow=False,
+                    change_detected=True,
+                    change_explanation=explanation,
+                ):
+                    self._store_today_snapshot(schedule_dict, current_hash)
+                return
+
+            self._queue_today_schedule_notification(
+                schedule_data,
+                schedule_dict,
+                current_hash,
+                old_schedule_dict or schedule_dict,
+            )
 
         except Exception as e:
             logger.error(f"[{self.group_config.group}] Error checking today's schedule: {e}")

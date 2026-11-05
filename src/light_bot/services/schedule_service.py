@@ -84,7 +84,7 @@ class ScheduleService:
         # For backward compatibility, expose the first group sender
         self.group_sender = self.multi_group_manager.get_sender(YASNO_GROUP_CONFIGS[0].id)
 
-    async def _get_cached_schedule(self):
+    async def _get_cached_schedule(self, force_refresh: bool = False):
         """Get cached schedule if still valid, otherwise fetch new data
 
         Cache is considered valid if it's less than SCHEDULE_CHECK_INTERVAL old.
@@ -102,7 +102,7 @@ class ScheduleService:
             now = datetime.now(TIMEZONE)
 
             # Check if cache is still valid
-            if self._cached_schedule and self._cache_timestamp:
+            if not force_refresh and self._cached_schedule and self._cache_timestamp:
                 cache_age = (now - self._cache_timestamp).total_seconds()
                 if cache_age < SCHEDULE_CHECK_INTERVAL:
                     logger.debug(f"Using cached schedule (age: {int(cache_age)}s)")
@@ -210,7 +210,9 @@ class ScheduleService:
                 # Skip schedule checks immediately after rollover to allow API to update
                 if not rollover_performed:
                     # Fetch schedule data once for both checks
-                    schedule_data = await self._get_cached_schedule()
+                    schedule_data = await self._get_cached_schedule(
+                        force_refresh=self.multi_group_manager.has_pending_schedule_notifications()
+                    )
 
                     if schedule_data:
                         # Check all groups
@@ -258,8 +260,13 @@ class ScheduleService:
                         except Exception as e:
                             logger.error(f"Error re-resolving dynamic groups: {e}")
 
-                # Wait before next check
-                await asyncio.sleep(SCHEDULE_CHECK_INTERVAL)
+                # Poll more often only while a notification is being coalesced, so
+                # the eventual post contains the newest schedule seen during the window.
+                if self.multi_group_manager.has_pending_schedule_notifications():
+                    check_interval = min(SCHEDULE_CHECK_INTERVAL, 120)
+                else:
+                    check_interval = SCHEDULE_CHECK_INTERVAL
+                await asyncio.sleep(check_interval)
 
             except Exception as e:
                 logger.critical(f"Fatal error in monitoring loop: {e}")

@@ -112,6 +112,13 @@ class MultiGroupScheduleManager:
             except Exception as e:
                 logger.error(f"Error checking today's schedule for group {group}: {e}")
 
+    def has_pending_schedule_notifications(self) -> bool:
+        """Whether any group is inside its short schedule-change coalescing window."""
+        return any(
+            sender.has_pending_schedule_notification
+            for sender in self.group_senders.values()
+        )
+
     async def check_tomorrow_schedules(self, schedule_data: YasnoScheduleResponse) -> None:
         """Check tomorrow's schedule for all groups
 
