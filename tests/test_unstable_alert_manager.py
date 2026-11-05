@@ -126,8 +126,8 @@ class TestFrequentCutoffInstability:
         )
         base_time = datetime(2026, 11, 4, 18, 0, 0, tzinfo=timezone.utc)
 
-        # 1st, 2nd, 3rd cutoffs (within 1 hour) are short-lived and suppressed
-        for i in range(3):
+        # 1st, 2nd cutoffs (within 1 hour) are short-lived and suppressed
+        for i in range(2):
             t = base_time + timedelta(minutes=i * 10)
             manager.schedule_unstable_alert(location, t, voltage=255.0)
             assert manager.is_pending(location.id) is True
@@ -138,9 +138,9 @@ class TestFrequentCutoffInstability:
 
         mock_bot.send_message.assert_not_called()
 
-        # 4th cutoff within 1 hour: threshold > 3 is exceeded!
-        t_4th = base_time + timedelta(minutes=35)
-        manager.schedule_unstable_alert(location, t_4th, voltage=262.0)
+        # 3rd cutoff within 1 hour: threshold == 3 is reached!
+        t_3rd = base_time + timedelta(minutes=25)
+        manager.schedule_unstable_alert(location, t_3rd, voltage=262.0)
 
         # Must fire immediately without waiting for delay_seconds
         assert manager.is_pending(location.id) is False
@@ -150,7 +150,7 @@ class TestFrequentCutoffInstability:
 
         sent_text = mock_bot.send_message.call_args[0][0]
         assert "Зафіксовано часті стрибки напруги" in sent_text
-        assert "4 спрацювання реле" in sent_text
+        assert "3 спрацювання реле" in sent_text
         assert "262.0" in sent_text
 
     def test_frequent_cutoffs_cooldown_suppresses_rapid_retrigger(self, location, mock_bot, mock_stats_service):
