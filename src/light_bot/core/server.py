@@ -29,6 +29,12 @@ from light_bot.core.api_blueprint import create_api_blueprint, LLMS_TXT, OPENAPI
 
 logger = logging.getLogger(__name__)
 
+
+def _now():
+    """Return the current configured local time (overridable in deterministic simulations)."""
+    return datetime.now(TIMEZONE)
+
+
 app = Flask(__name__)
 stats_service = StatsService(DB_PATH)
 telegram_bot.set_stats_service(stats_service)
@@ -148,12 +154,13 @@ def write_power_status(
     voltage: Optional[float] = None,
     before_relay: Optional[bool] = None,
     after_relay: Optional[bool] = None,
-    source: Optional[str] = None
+    source: Optional[str] = None,
+    timestamp: Optional[datetime] = None
 ):
     """Write power status to file with timestamp and optional telemetry"""
     target_file = file_path or WATCHDOG_STATUS_FILE
     try:
-        timestamp = datetime.now(TIMEZONE).isoformat()
+        timestamp = (timestamp or _now()).isoformat()
         lines = [
             status,
             f"Last updated: {timestamp}"
@@ -383,7 +390,7 @@ def _handle_power_status_update(
         return jsonify({'error': f'Unknown location: {location_id}'}), 404
 
     target_file = None if loc.id == 'home' else loc.status_file
-    now_ts = datetime.now(TIMEZONE)
+    now_ts = _now()
 
     # Record telemetry reading to voltage_readings table
     stats_service.record_reading(
@@ -435,7 +442,15 @@ def _handle_power_status_update(
 
     # Write status to file
     if status_changed:
-        if not write_power_status(status, target_file, voltage=voltage, before_relay=before_relay, after_relay=after_relay, source=source):
+        if not write_power_status(
+            status,
+            target_file,
+            voltage=voltage,
+            before_relay=before_relay,
+            after_relay=after_relay,
+            source=source,
+            timestamp=now_ts,
+        ):
             return jsonify({'error': 'Failed to write status to file'}), 500
         
         # Record event in DB

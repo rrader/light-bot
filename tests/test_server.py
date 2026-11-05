@@ -136,8 +136,8 @@ class TestPowerStatusEndpoint:
 
             assert response.status_code == 200
 
-    def test_stabilization_sent_when_unstable_was_sustained_across_restart(self, client, temp_power_file):
-        """Test that voltage stabilization message is sent when previous state was unstable for >= 180s"""
+    def test_stabilization_notice_is_scheduled_after_sustained_unstable_state_across_restart(self, client, temp_power_file):
+        """A sustained instability starts the one-hour recovery confirmation after restart."""
         from datetime import datetime, timedelta
         from light_bot.config import TIMEZONE
 
@@ -149,6 +149,7 @@ class TestPowerStatusEndpoint:
             f.write("Voltage: 275.0\n")
 
         with patch('light_bot.core.server.WATCHDOG_STATUS_FILE', temp_power_file), \
+             patch('light_bot.core.server.unstable_alert_manager.schedule_stabilization_alert') as schedule_stabilization, \
              patch('light_bot.core.server.telegram_bot.send_message', new_callable=AsyncMock) as mock_send:
 
             response = client.post('/power-status',
@@ -158,10 +159,10 @@ class TestPowerStatusEndpoint:
             assert response.status_code == 200
             data = json.loads(response.data)
             assert data['status_changed'] is True
-            assert data['notification_sent'] is True
-            assert mock_send.called
-            sent_msg = mock_send.call_args[0][0]
-            assert "стабілізувалась" in sent_msg
+            assert data['notification_sent'] is False
+            mock_send.assert_not_called()
+            schedule_stabilization.assert_called_once()
+            assert schedule_stabilization.call_args.args[0].id == 'home'
 
     def test_power_on_sent_after_brief_unstable_following_outage(self, client, temp_power_file):
         """Test that power ON message is sent when unstable was a brief relay delay after an outage"""

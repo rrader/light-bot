@@ -9,6 +9,10 @@ from light_bot.core.bot import get_webapp_inline_keyboard
 logger = logging.getLogger(__name__)
 
 
+def _now():
+    return datetime.now().astimezone()
+
+
 class UnstableAlertManager:
     """
     Manages delayed Telegram notifications for unstable power state.
@@ -201,7 +205,7 @@ class UnstableAlertManager:
             self._stabilization_timers.pop(location_id, None)
 
         message = PowerStatusFormatter.format_power_on_message(
-            datetime.now().astimezone(),
+            _now(),
             location_name=None if location_id == 'home' else location.name,
             voltage=voltage,
             was_unstable=True,

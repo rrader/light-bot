@@ -44,7 +44,9 @@ class PowerStatusFormatter:
             f"🕐 Час: {kyiv_time}\n"
         )
 
-        if voltage is not None:
+        # A zero reading can accompany a relay/sensor transition before the voltmeter
+        # has produced a valid sample; never report it as a real line voltage.
+        if voltage is not None and voltage > 0:
             if was_unstable and min_voltage is not None and max_voltage is not None and (max_voltage - min_voltage) >= 2.0:
                 message += f"⚡️ Напруга в мережі: <b>{voltage:.1f} В</b> (діапазон коливань: {min_voltage:.1f}–{max_voltage:.1f} В)\n"
             else:
