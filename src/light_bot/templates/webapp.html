@@ -844,6 +844,12 @@
         let historicalEvents = [];
         let scheduleHistory = [];
         let availableDates = new Set([selectedDate]);
+        const scheduleByDate = new Map();
+        let cachedStatusData = null;
+        let cachedScheduleData = null;
+        let lastEventsFetch = 0;
+        let lastScheduleFetch = 0;
+        let lastScheduleHistoryFetch = 0;
         const calendar = document.getElementById('historyCalendar');
         let calendarMonth = selectedDate.slice(0,7);
         function updateDateControls() {
@@ -884,19 +890,27 @@
 
         async function renderSelectedDay() {
             const isToday = selectedDate === todayKey();
-            let scheduleInfo = null;
             const renderDate = selectedDate;
-            try {
-                const response = await fetch(`/api/schedule-history/${currentLocation}?date=${encodeURIComponent(renderDate)}`);
-                if (response.ok) {
-                    const [snapshot] = await response.json();
-                    if (snapshot?.schedule_text) {
-                        const data = JSON.parse(snapshot.schedule_text);
-                        scheduleInfo = {schedule:{...(normalizeDateKey(data.today?.date) === renderDate ? {today:data.today} : {}), ...(normalizeDateKey(data.tomorrow?.date) === renderDate ? {today:data.tomorrow} : {})}};
+            let scheduleInfo = scheduleByDate.get(renderDate);
+            if (!scheduleByDate.has(renderDate)) {
+                try {
+                    const response = await fetch(`/api/schedule-history/${currentLocation}?date=${encodeURIComponent(renderDate)}`);
+                    if (response.ok) {
+                        const [snapshot] = await response.json();
+                        if (snapshot?.schedule_text) {
+                            const data = JSON.parse(snapshot.schedule_text);
+                            scheduleInfo = {schedule:{...(normalizeDateKey(data.today?.date) === renderDate ? {today:data.today} : {}), ...(normalizeDateKey(data.tomorrow?.date) === renderDate ? {today:data.tomorrow} : {})}};
+                        } else {
+                            scheduleInfo = null;
+                        }
+                        scheduleByDate.set(renderDate, scheduleInfo);
+                    } else {
+                        scheduleByDate.set(renderDate, null);
                     }
+                } catch (e) {
+                    console.warn(`Schedule history unavailable for ${renderDate}:`, e);
+                    scheduleByDate.set(renderDate, null);
                 }
-            } catch (e) {
-                console.warn(`Schedule history unavailable for ${renderDate}:`, e);
             }
             if (selectedDate !== renderDate) return;
             const relevant = historicalEvents.filter(e => normalizeDateKey(e.timestamp || e.t) === selectedDate);
@@ -915,42 +929,58 @@
             try {
                 // 1. Fetch power status
                 const statusRes = await fetch(`/api/power-status/${currentLocation}`);
-                const statusData = await statusRes.json();
+                if (statusRes.ok) cachedStatusData = await statusRes.json();
+                const statusData = cachedStatusData;
+                if (!statusData) return;
 
-                // 2. Fetch schedule
-                let scheduleData = null;
-                try {
-                    const scheduleRes = await fetch(`/api/schedule/${currentLocation}`);
-                    if (scheduleRes.ok) {
-                        scheduleData = await scheduleRes.json();
+                // Schedule changes are much less frequent than live status changes.
+                if (!cachedScheduleData || Date.now() - lastScheduleFetch >= 60000) {
+                    lastScheduleFetch = Date.now();
+                    try {
+                        const scheduleRes = await fetch(`/api/schedule/${currentLocation}`);
+                        if (scheduleRes.ok) {
+                            cachedScheduleData = await scheduleRes.json();
+                            const todayPlan = cachedScheduleData?.schedule?.today;
+                            if (todayPlan?.date) {
+                                const key = normalizeDateKey(todayPlan.date);
+                                scheduleByDate.set(key, {schedule:{today:todayPlan}});
+                                availableDates.add(key);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Schedule not available:", e);
                     }
-                } catch (e) {
-                    console.warn("Schedule not available:", e);
+                }
+                const scheduleData = cachedScheduleData;
+
+                // Event history refreshes once a minute; status remains live at 10s.
+                if (!lastEventsFetch || Date.now() - lastEventsFetch >= 60000) {
+                    lastEventsFetch = Date.now();
+                    try {
+                        const evRes = await fetch(`/api/events?limit=10000&location=${currentLocation}`);
+                        if (evRes.ok) {
+                            historicalEvents = await evRes.json();
+                            historicalEvents.forEach(e => { const d=normalizeDateKey(e.timestamp||e.t); if (d) availableDates.add(d); });
+                        }
+                    } catch (e) {
+                        console.warn("Events not available:", e);
+                    }
                 }
 
-                // 3. Fetch recent events to compute fact track and status duration
-                let eventsData = [];
-                try {
-                    const evRes = await fetch(`/api/events?limit=10000&location=${currentLocation}`);
-                    if (evRes.ok) {
-                        historicalEvents = eventsData = await evRes.json();
-                        historicalEvents.forEach(e => { const d=normalizeDateKey(e.timestamp||e.t); if (d) availableDates.add(d); });
-                    }
-                } catch (e) {
-                    console.warn("Events not available:", e);
+                if (!lastScheduleHistoryFetch || Date.now() - lastScheduleHistoryFetch >= 3600000) {
+                    lastScheduleHistoryFetch = Date.now();
+                    try {
+                        const historyRes = await fetch(`/api/schedule-history/${currentLocation}?limit=100`);
+                        if (historyRes.ok) {
+                            scheduleHistory = await historyRes.json();
+                            scheduleHistory.forEach(item => { try { const data=JSON.parse(item.schedule_text); [data.today?.date,data.tomorrow?.date].map(normalizeDateKey).filter(Boolean).forEach(d=>availableDates.add(d)); } catch (_) {} });
+                        }
+                    } catch (e) { console.warn('Schedule history unavailable:', e); }
                 }
-
-                try {
-                    const historyRes = await fetch(`/api/schedule-history/${currentLocation}?limit=100`);
-                    if (historyRes.ok) {
-                        scheduleHistory = await historyRes.json();
-                        scheduleHistory.forEach(item => { try { const data=JSON.parse(item.schedule_text); [data.today?.date,data.tomorrow?.date].map(normalizeDateKey).filter(Boolean).forEach(d=>availableDates.add(d)); } catch (_) {} });
-                    }
-                } catch (e) { console.warn('Schedule history unavailable:', e); }
 
                 lastSyncTime = new Date();
                 tickSyncBadge();
-                renderView(statusData, scheduleData, eventsData);
+                renderView(statusData, scheduleData, historicalEvents);
                 window.latestStatus = (statusData.status || 'on').toLowerCase();
                 updateDateControls();
                 renderSelectedDay();
