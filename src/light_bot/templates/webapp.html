@@ -814,7 +814,32 @@
         }
         setInterval(tickDuration, 10000);
 
-        const todayKey = () => new Intl.DateTimeFormat('en-CA', {timeZone:'Europe/Kyiv', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
+        const dateKeyInKyiv = value => {
+            const d = value instanceof Date ? value : new Date(value);
+            if (Number.isNaN(d.getTime())) return '';
+            const parts = new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Kyiv', year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(d);
+            const part = type => parts.find(p => p.type === type)?.value || '';
+            return `${part('year')}-${part('month')}-${part('day')}`;
+        };
+        const normalizeDateKey = value => {
+            if (!value) return '';
+            const raw = String(value);
+            if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+            return dateKeyInKyiv(raw);
+        };
+        const todayKey = () => dateKeyInKyiv(new Date());
+        function kyivWallTime(dateKey, hour = 0, minute = 0, second = 0) {
+            const [year, month, day] = dateKey.split('-').map(Number);
+            const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+            let result = new Date(wallUtc);
+            for (let i = 0; i < 2; i++) {
+                const parts = new Intl.DateTimeFormat('en-GB', {timeZone:'Europe/Kyiv', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit', hourCycle:'h23'}).formatToParts(result);
+                const get = type => Number(parts.find(p => p.type === type)?.value || 0);
+                const representedUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+                result = new Date(result.getTime() + wallUtc - representedUtc);
+            }
+            return result;
+        }
         let selectedDate = todayKey();
         let historicalEvents = [];
         let scheduleHistory = [];
@@ -823,7 +848,8 @@
         let calendarMonth = selectedDate.slice(0,7);
         function updateDateControls() {
             const today = selectedDate === todayKey();
-            document.getElementById('historyDateButton').textContent = today ? 'Сьогодні' : new Date(`${selectedDate}T12:00:00`).toLocaleDateString('uk-UA', {timeZone:'Europe/Kyiv', day:'numeric', month:'long', year:'numeric'});
+            const [year, month, day] = selectedDate.split('-').map(Number);
+            document.getElementById('historyDateButton').textContent = today ? 'Сьогодні' : new Date(year, month - 1, day, 12).toLocaleDateString('uk-UA', {day:'numeric', month:'long', year:'numeric'});
             document.getElementById('nextDay').disabled = today;
             renderCalendar();
         }
@@ -862,20 +888,22 @@
             const candidates = scheduleHistory.filter(item => {
                 try {
                     const data = JSON.parse(item.schedule_text);
-                    return (item.timestamp || '').slice(0,10) <= selectedDate && (data?.today?.date === selectedDate || data?.tomorrow?.date === selectedDate);
+                    return normalizeDateKey(item.timestamp) <= selectedDate && (normalizeDateKey(data?.today?.date) === selectedDate || normalizeDateKey(data?.tomorrow?.date) === selectedDate);
                 } catch (_) { return false; }
             });
             if (candidates.length) {
                 const chosen = candidates[0];
                 const data = JSON.parse(chosen.schedule_text);
-                scheduleInfo = {schedule:{...(data.today?.date === selectedDate ? {today:data.today} : {}), ...(data.tomorrow?.date === selectedDate ? {today:data.tomorrow} : {})}};
+                scheduleInfo = {schedule:{...(normalizeDateKey(data.today?.date) === selectedDate ? {today:data.today} : {}), ...(normalizeDateKey(data.tomorrow?.date) === selectedDate ? {today:data.tomorrow} : {})}};
             }
-            const relevant = historicalEvents.filter(e => (e.timestamp || e.t || '').slice(0,10) === selectedDate);
-            const boundary = historicalEvents.find(e => (e.timestamp || e.t || '').slice(0,10) < selectedDate);
+            const relevant = historicalEvents.filter(e => normalizeDateKey(e.timestamp || e.t) === selectedDate);
+            const boundary = historicalEvents.find(e => normalizeDateKey(e.timestamp || e.t) < selectedDate);
             const events = [...relevant];
             if (boundary) events.push(boundary);
             const status = isToday ? (window.latestStatus || 'on') : 'on';
-            const dayEndMins = isToday ? Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()).split(':')[0])*60 + Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Kyiv',minute:'2-digit',hour12:false}).format(new Date())) : 1440;
+            const nowParts = new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+            const nowPart = type => Number(nowParts.find(p => p.type === type)?.value || 0);
+            const dayEndMins = isToday ? nowPart('hour') * 60 + nowPart('minute') : 1440;
             renderDualTimeline(scheduleInfo, events, status, selectedDate, dayEndMins, isToday);
         }
 
@@ -903,7 +931,7 @@
                     const evRes = await fetch(`/api/events?limit=10000&location=${currentLocation}`);
                     if (evRes.ok) {
                         historicalEvents = eventsData = await evRes.json();
-                        historicalEvents.forEach(e => { const d=(e.timestamp||e.t||'').slice(0,10); if (d) availableDates.add(d); });
+                        historicalEvents.forEach(e => { const d=normalizeDateKey(e.timestamp||e.t); if (d) availableDates.add(d); });
                     }
                 } catch (e) {
                     console.warn("Events not available:", e);
@@ -913,7 +941,7 @@
                     const historyRes = await fetch(`/api/schedule-history/${currentLocation}?limit=100`);
                     if (historyRes.ok) {
                         scheduleHistory = await historyRes.json();
-                        scheduleHistory.forEach(item => { try { const data=JSON.parse(item.schedule_text); [data.today?.date,data.tomorrow?.date].filter(Boolean).forEach(d=>availableDates.add(d)); } catch (_) {} });
+                        scheduleHistory.forEach(item => { try { const data=JSON.parse(item.schedule_text); [data.today?.date,data.tomorrow?.date].map(normalizeDateKey).filter(Boolean).forEach(d=>availableDates.add(d)); } catch (_) {} });
                     }
                 } catch (e) { console.warn('Schedule history unavailable:', e); }
 
@@ -1053,8 +1081,7 @@
             // Relative updated time: kept updated by tickSyncBadge() based on lastSyncTime
             tickSyncBadge();
 
-            // Render 2-track timeline (Schedule + Fact)
-            renderDualTimeline(scheduleInfo, eventsList, status);
+            // Timeline is rendered once after the selected date and history are normalized.
         }
 
         function showTimelineTooltip(e, text) {
@@ -1121,8 +1148,6 @@
                 schedContainer.appendChild(seg);
 
                 boundaryMinutes.push(1440);
-                document.getElementById('rightStatLabel').textContent = '🚨 Стан графіка';
-                document.getElementById('rightStatVal').textContent = (isEmergency ? 'Екстрені відключення' : 'Без відключень');
             } else {
                 slots.forEach(slot => {
                     const duration = slot.end - slot.start;
@@ -1160,8 +1185,6 @@
                     if (!boundaryMinutes.includes(slot.end) && slot.end < 1440) boundaryMinutes.push(slot.end);
                 });
 
-                document.getElementById('rightStatLabel').textContent = 'Наступне відключення';
-                document.getElementById('rightStatVal').textContent = nextOutageText;
             }
 
             // ==========================================
@@ -1261,7 +1284,7 @@
                 const rawTs = e.timestamp || e.t;
                 if (!rawTs) return;
                 const d = new Date(rawTs);
-                const eventKyivDate = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' });
+                const eventKyivDate = dateKeyInKyiv(d);
                 const kyivTimeStr = d.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
                 const parts = kyivTimeStr.split(':');
                 const secs = (parseInt(parts[0], 10) * 3600) + (parseInt(parts[1], 10) * 60) + parseInt(parts[2], 10);
@@ -1311,8 +1334,8 @@
                 intervals.push({
                     start: 0,
                     end: currentMins,
-                    startDate: new Date(`${selectedDay}T00:00:00+03:00`),
-                    endDate: isToday ? now : new Date(`${selectedDay}T23:59:59+03:00`),
+                    startDate: kyivWallTime(selectedDay),
+                    endDate: isToday ? now : kyivWallTime(selectedDay, 23, 59, 59),
                     durationSec: Math.round(currentMins * 60),
                     status: initialStatus
                 });
@@ -1322,7 +1345,7 @@
                     intervals.push({
                         start: 0,
                         end: firstEv.mins,
-                        startDate: new Date(`${selectedDay}T00:00:00+03:00`),
+                        startDate: kyivWallTime(selectedDay),
                         endDate: firstEv.rawDate,
                         durationSec: Math.max(1, Math.round(firstEv.mins * 60)),
                         status: initialStatus
@@ -1333,7 +1356,7 @@
                     const ev = todayEvents[i];
                     const nextEv = (i + 1 < todayEvents.length) ? todayEvents[i + 1] : null;
                     const nextMins = nextEv ? nextEv.mins : currentMins;
-                    const nextDate = nextEv ? nextEv.rawDate : (isToday ? now : new Date(`${selectedDay}T23:59:59+03:00`));
+                    const nextDate = nextEv ? nextEv.rawDate : (isToday ? now : kyivWallTime(selectedDay, 23, 59, 59));
                     const durSec = Math.max(1, Math.round((nextDate - ev.rawDate) / 1000));
 
                     if (nextMins > ev.mins) {
