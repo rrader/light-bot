@@ -1,6 +1,7 @@
 import pytest
 import sqlite3
 import os
+import json
 from datetime import datetime, timedelta
 from light_bot.services.stats_service import StatsService
 from light_bot.models.power_event import PowerEvent
@@ -68,6 +69,25 @@ def test_get_recent_events_limit(stats_service):
     assert len(events) == 5
     # Should be the latest ones (highest timestamp)
     assert events[0].timestamp > events[-1].timestamp
+
+
+def test_get_schedule_history_for_date_returns_latest_snapshot_containing_day(stats_service):
+    for timestamp, today, tomorrow, marker in [
+        ('2026-11-05T18:30:00+02:00', '2026-11-05', '2026-11-06', 'previous-evening'),
+        ('2026-11-06T08:00:00+02:00', '2026-11-06', '2026-11-07', 'morning'),
+        ('2026-11-06T17:00:00+02:00', '2026-11-06', '2026-11-07', 'latest-on-day'),
+        ('2026-11-07T08:00:00+02:00', '2026-11-07', '2026-11-08', 'following-day'),
+    ]:
+        schedule = json.dumps({
+            'today': {'date': f'{today}T00:00:00+02:00', 'marker': marker},
+            'tomorrow': {'date': f'{tomorrow}T00:00:00+02:00'},
+        })
+        stats_service.record_schedule_history('home', schedule, datetime.fromisoformat(timestamp))
+
+    result = stats_service.get_schedule_history_for_date('home', '2026-11-06')
+
+    assert len(result) == 1
+    assert json.loads(result[0].schedule_text)['today']['marker'] == 'latest-on-day'
 
 def test_get_stats_empty(stats_service):
     stats = stats_service.get_stats()

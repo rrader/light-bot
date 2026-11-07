@@ -177,6 +177,35 @@ class StatsService:
             logger.error(f"Failed to get schedule history for group {group_id}: {e}")
             return []
 
+    def get_schedule_history_for_date(self, group_id: str, date_str: str) -> List[ScheduleHistory]:
+        """Get the latest recorded schedule snapshot that contains the requested local date."""
+        try:
+            # Stored snapshots contain ISO dates in today.date / tomorrow.date. Keep the
+            # timestamp cutoff inclusive of the full requested day and avoid loading the
+            # entire schedule history into the web client.
+            next_day = (datetime.strptime(date_str, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+            with self._get_conn() as conn:
+                row = conn.execute(
+                    '''SELECT id, group_id, schedule_text, timestamp
+                       FROM schedule_history
+                       WHERE group_id = ?
+                         AND timestamp < ?
+                         AND (json_extract(schedule_text, '$.today.date') LIKE ?
+                              OR json_extract(schedule_text, '$.tomorrow.date') LIKE ?)
+                       ORDER BY timestamp DESC
+                       LIMIT 1''',
+                    (group_id, f'{next_day}T', f'{date_str}%', f'{date_str}%')
+                ).fetchone()
+            if not row:
+                return []
+            timestamp = datetime.fromisoformat(row[3])
+            if timestamp.tzinfo is None:
+                timestamp = TIMEZONE.localize(timestamp)
+            return [ScheduleHistory(id=row[0], group_id=row[1], schedule_text=row[2], timestamp=timestamp)]
+        except Exception as e:
+            logger.error(f"Failed to get schedule history for {group_id} on {date_str}: {e}")
+            return []
+
     def record_event(
         self,
         status: str,

@@ -860,6 +860,15 @@ def create_api_blueprint(stats_service: StatsService, read_power_status_fn: Call
     def public_schedule_history(group_id: str):
         """Get schedule history entries for a group. Preserves backward compatibility. Public, no token required."""
         try:
+            date_str = request.args.get('date', type=str)
+            if date_str:
+                try:
+                    datetime.strptime(date_str, '%Y-%m-%d')
+                except ValueError:
+                    return jsonify({'error': 'date must use YYYY-MM-DD format'}), 400
+                history = stats_service.get_schedule_history_for_date(group_id, date_str)
+                return jsonify([h.__dict__ for h in history]), 200
+
             limit = request.args.get('limit', default=10, type=int)
             limit = max(1, min(limit, 100))
             history = stats_service.get_schedule_history(group_id, limit=limit)

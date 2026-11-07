@@ -882,20 +882,23 @@
             }));
         }
 
-        function renderSelectedDay() {
+        async function renderSelectedDay() {
             const isToday = selectedDate === todayKey();
             let scheduleInfo = null;
-            const candidates = scheduleHistory.filter(item => {
-                try {
-                    const data = JSON.parse(item.schedule_text);
-                    return normalizeDateKey(item.timestamp) <= selectedDate && (normalizeDateKey(data?.today?.date) === selectedDate || normalizeDateKey(data?.tomorrow?.date) === selectedDate);
-                } catch (_) { return false; }
-            });
-            if (candidates.length) {
-                const chosen = candidates[0];
-                const data = JSON.parse(chosen.schedule_text);
-                scheduleInfo = {schedule:{...(normalizeDateKey(data.today?.date) === selectedDate ? {today:data.today} : {}), ...(normalizeDateKey(data.tomorrow?.date) === selectedDate ? {today:data.tomorrow} : {})}};
+            const renderDate = selectedDate;
+            try {
+                const response = await fetch(`/api/schedule-history/${currentLocation}?date=${encodeURIComponent(renderDate)}`);
+                if (response.ok) {
+                    const [snapshot] = await response.json();
+                    if (snapshot?.schedule_text) {
+                        const data = JSON.parse(snapshot.schedule_text);
+                        scheduleInfo = {schedule:{...(normalizeDateKey(data.today?.date) === renderDate ? {today:data.today} : {}), ...(normalizeDateKey(data.tomorrow?.date) === renderDate ? {today:data.tomorrow} : {})}};
+                    }
+                }
+            } catch (e) {
+                console.warn(`Schedule history unavailable for ${renderDate}:`, e);
             }
+            if (selectedDate !== renderDate) return;
             const relevant = historicalEvents.filter(e => normalizeDateKey(e.timestamp || e.t) === selectedDate);
             const boundary = historicalEvents.find(e => normalizeDateKey(e.timestamp || e.t) < selectedDate);
             const events = [...relevant];
