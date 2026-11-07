@@ -267,6 +267,20 @@
             margin-top: 4px;
         }
 
+        .history-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .history-controls button, .history-date { border:1px solid var(--border-color); background:var(--stat-bg); color:var(--text-color); border-radius:10px; padding:8px 11px; font:inherit; font-size:13px; }
+        .history-controls button { cursor:pointer; }
+        .history-date { min-width:0; flex:1; text-align:center; }
+        .history-controls input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+        .calendar-popover { position:absolute; z-index:20; top:42px; left:50%; transform:translateX(-50%); width:min(290px, 92vw); padding:12px; border:1px solid var(--border-color); border-radius:14px; background:var(--card-bg); box-shadow:0 8px 28px rgba(0,0,0,.22); }
+        .calendar-head,.calendar-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; text-align:center; }
+        .calendar-head { grid-template-columns:36px 1fr 36px; align-items:center; margin-bottom:9px; font-size:13px; font-weight:700; }
+        .calendar-grid { font-size:12px; }
+        .calendar-grid button { min-height:32px; border:0; border-radius:8px; background:transparent; color:var(--text-color); }
+        .calendar-grid button.available { background:var(--stat-bg); cursor:pointer; font-weight:700; }
+        .calendar-grid button.selected { background:#007aff; color:white; }
+        .calendar-grid button:disabled { opacity:.28; }
+
         .timeline-legend {
             display: flex;
             align-items: center;
@@ -598,6 +612,12 @@
 
             <!-- 2-Track visual timeline bar -->
             <div class="timeline-section">
+                <div class="history-controls">
+                    <button id="previousDay" aria-label="Попередній день">‹</button>
+                    <button class="history-date" id="historyDateButton" type="button">Сьогодні</button>
+                    <div id="historyCalendar" class="calendar-popover" hidden></div>
+                    <button id="nextDay" aria-label="Наступний день">›</button>
+                </div>
                 <!-- Floating tooltip for segment inspect -->
                 <div class="timeline-tooltip" id="timelineTooltip"></div>
 
@@ -642,12 +662,12 @@
             <!-- Bottom stat cards -->
             <div class="stat-grid">
                 <div class="stat-box">
-                    <div class="stat-label" id="leftStatLabel">Всього за добу без світла</div>
-                    <div class="stat-value" id="outageStatVal">--</div>
+                    <div class="stat-label">Без світла за графіком</div>
+                    <div class="stat-value" id="scheduledOutageVal">--</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-label" id="rightStatLabel">Наступне відключення</div>
-                    <div class="stat-value" id="rightStatVal">--</div>
+                    <div class="stat-label">Без світла фактично</div>
+                    <div class="stat-value" id="actualOutageVal">--</div>
                 </div>
             </div>
         </div>
@@ -794,7 +814,72 @@
         }
         setInterval(tickDuration, 10000);
 
-        // Fetch power status, schedule and events
+        const todayKey = () => new Intl.DateTimeFormat('en-CA', {timeZone:'Europe/Kyiv', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
+        let selectedDate = todayKey();
+        let historicalEvents = [];
+        let scheduleHistory = [];
+        let availableDates = new Set([selectedDate]);
+        const calendar = document.getElementById('historyCalendar');
+        let calendarMonth = selectedDate.slice(0,7);
+        function updateDateControls() {
+            const today = selectedDate === todayKey();
+            document.getElementById('historyDateButton').textContent = today ? 'Сьогодні' : new Date(`${selectedDate}T12:00:00`).toLocaleDateString('uk-UA', {timeZone:'Europe/Kyiv', day:'numeric', month:'long', year:'numeric'});
+            document.getElementById('nextDay').disabled = today;
+            renderCalendar();
+        }
+        function changeDate(delta) {
+            const keys = [...availableDates].sort();
+            const candidates = keys.filter(d => delta < 0 ? d < selectedDate : d > selectedDate);
+            const next = delta < 0 ? candidates.at(-1) : candidates[0];
+            if (next) { selectedDate = next; updateDateControls(); renderSelectedDay(); }
+        }
+        document.getElementById('previousDay').addEventListener('click', () => changeDate(-1));
+        document.getElementById('nextDay').addEventListener('click', () => changeDate(1));
+        document.getElementById('historyDateButton').addEventListener('click', () => {
+            calendarMonth = selectedDate.slice(0,7);
+            calendar.hidden = !calendar.hidden;
+            renderCalendar();
+        });
+        function renderCalendar() {
+            if (!calendar || calendar.hidden) return;
+            const [year, month] = calendarMonth.split('-').map(Number);
+            const first = new Date(Date.UTC(year, month - 1, 1));
+            const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+            const offset = (first.getUTCDay() + 6) % 7;
+            const title = first.toLocaleDateString('uk-UA', {month:'long', year:'numeric', timeZone:'UTC'});
+            calendar.innerHTML = `<div class="calendar-head"><button type="button" data-month="-1">‹</button><span>${title}</span><button type="button" data-month="1">›</button></div><div class="calendar-grid">${['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map(d=>`<span>${d}</span>`).join('')}${'<span></span>'.repeat(offset)}${Array.from({length:days},(_,i)=>{const day=String(i+1).padStart(2,'0'), key=`${calendarMonth}-${day}`, available=availableDates.has(key); return `<button type="button" class="${available?'available':''} ${key===selectedDate?'selected':''}" data-date="${key}" ${available?'':'disabled'}>${i+1}</button>`;}).join('')}</div>`;
+            calendar.querySelectorAll('[data-month]').forEach(button => button.addEventListener('click', () => {
+                const delta=Number(button.dataset.month); const d=new Date(Date.UTC(year,month-1+delta,1)); calendarMonth=`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`; renderCalendar();
+            }));
+            calendar.querySelectorAll('[data-date]').forEach(button => button.addEventListener('click', () => {
+                selectedDate=button.dataset.date; calendar.hidden=true; updateDateControls(); renderSelectedDay();
+            }));
+        }
+
+        function renderSelectedDay() {
+            const isToday = selectedDate === todayKey();
+            let scheduleInfo = null;
+            const candidates = scheduleHistory.filter(item => {
+                try {
+                    const data = JSON.parse(item.schedule_text);
+                    return (item.timestamp || '').slice(0,10) <= selectedDate && (data?.today?.date === selectedDate || data?.tomorrow?.date === selectedDate);
+                } catch (_) { return false; }
+            });
+            if (candidates.length) {
+                const chosen = candidates[0];
+                const data = JSON.parse(chosen.schedule_text);
+                scheduleInfo = {schedule:{...(data.today?.date === selectedDate ? {today:data.today} : {}), ...(data.tomorrow?.date === selectedDate ? {today:data.tomorrow} : {})}};
+            }
+            const relevant = historicalEvents.filter(e => (e.timestamp || e.t || '').slice(0,10) === selectedDate);
+            const boundary = historicalEvents.find(e => (e.timestamp || e.t || '').slice(0,10) < selectedDate);
+            const events = [...relevant];
+            if (boundary) events.push(boundary);
+            const status = isToday ? (window.latestStatus || 'on') : 'on';
+            const dayEndMins = isToday ? Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Kyiv',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date()).split(':')[0])*60 + Number(new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Kyiv',minute:'2-digit',hour12:false}).format(new Date())) : 1440;
+            renderDualTimeline(scheduleInfo, events, status, selectedDate, dayEndMins, isToday);
+        }
+
+        // Fetch power status, schedule and event/schedule history
         async function fetchData() {
             try {
                 // 1. Fetch power status
@@ -815,17 +900,29 @@
                 // 3. Fetch recent events to compute fact track and status duration
                 let eventsData = [];
                 try {
-                    const evRes = await fetch(`/api/events?limit=100&location=${currentLocation}`);
+                    const evRes = await fetch(`/api/events?limit=10000&location=${currentLocation}`);
                     if (evRes.ok) {
-                        eventsData = await evRes.json();
+                        historicalEvents = eventsData = await evRes.json();
+                        historicalEvents.forEach(e => { const d=(e.timestamp||e.t||'').slice(0,10); if (d) availableDates.add(d); });
                     }
                 } catch (e) {
                     console.warn("Events not available:", e);
                 }
 
+                try {
+                    const historyRes = await fetch(`/api/schedule-history/${currentLocation}?limit=100`);
+                    if (historyRes.ok) {
+                        scheduleHistory = await historyRes.json();
+                        scheduleHistory.forEach(item => { try { const data=JSON.parse(item.schedule_text); [data.today?.date,data.tomorrow?.date].filter(Boolean).forEach(d=>availableDates.add(d)); } catch (_) {} });
+                    }
+                } catch (e) { console.warn('Schedule history unavailable:', e); }
+
                 lastSyncTime = new Date();
                 tickSyncBadge();
                 renderView(statusData, scheduleData, eventsData);
+                window.latestStatus = (statusData.status || 'on').toLowerCase();
+                updateDateControls();
+                renderSelectedDay();
             } catch (e) {
                 console.error("Failed to load status:", e);
             }
@@ -983,7 +1080,7 @@
             }
         }
 
-        function renderDualTimeline(scheduleInfo, eventsList, currentStatus) {
+        function renderDualTimeline(scheduleInfo, eventsList, currentStatus, dateKey = todayKey(), dayEndMins = 1440, isToday = true) {
             const schedContainer = document.getElementById('timelineScheduleTrack');
             const factContainer = document.getElementById('timelineFactTrack');
             const labelsContainer = document.getElementById('timelineLabels');
@@ -994,9 +1091,8 @@
             labelsContainer.innerHTML = '';
 
             const now = new Date();
-            const kyivTimeStr = now.toLocaleTimeString('en-US', { timeZone: 'Europe/Kyiv', hour12: false });
-            const parts = kyivTimeStr.split(':');
-            const currentMins = (parseInt(parts[0], 10) * 60) + parseInt(parts[1], 10) + (parseInt(parts[2], 10) || 0) / 60;
+            const currentMins = dayEndMins;
+            document.getElementById('timelineCursor').style.display = isToday ? '' : 'none';
 
             // ==========================================
             // 1. TOP TRACK: SCHEDULE
@@ -1039,7 +1135,7 @@
                     let statusLabel = 'Світло за графіком';
                     if (isOutage) {
                         seg.classList.add(slot.type === 'Maybe' ? 'maybe' : 'off');
-                        scheduledOutageMins += duration;
+                        scheduledOutageMins += Math.max(0, Math.min(slot.end, currentMins) - Math.min(slot.start, currentMins));
                         statusLabel = (slot.type === 'Maybe' ? 'Можливе відключення' : 'Відключення за графіком');
                         if (slot.start > currentMins && nextOutageText === '--') {
                             nextOutageText = `${minsToTimeStr(slot.start)} – ${minsToTimeStr(slot.end)}`;
@@ -1071,7 +1167,7 @@
             // ==========================================
             // 2. BOTTOM TRACK: FACT (REAL LIGHT)
             // ==========================================
-            const factSegments = buildFactSegments(eventsList, currentStatus, currentMins);
+            const factSegments = buildFactSegments(eventsList, currentStatus, currentMins, dateKey, isToday);
             let factOutageSec = 0;
 
             factSegments.forEach(segData => {
@@ -1143,19 +1239,8 @@
                 }
             });
 
-            // Update left stat card: show scheduled or fact outage hours
-            if (isEmergency) {
-                document.getElementById('leftStatLabel').textContent = 'Всього за добу без світла (факт)';
-                const factOutageMins = Math.floor(factOutageSec / 60);
-                const fH = Math.floor(factOutageMins / 60);
-                const fM = factOutageMins % 60;
-                document.getElementById('outageStatVal').textContent = `${fH} год ${fM} хв`;
-            } else {
-                document.getElementById('leftStatLabel').textContent = 'Всього за добу за графіком';
-                const outHours = Math.floor(scheduledOutageMins / 60);
-                const outPct = Math.round((scheduledOutageMins / 1440) * 100);
-                document.getElementById('outageStatVal').textContent = `${outHours} год (${outPct}%)`;
-            }
+            document.getElementById('scheduledOutageVal').textContent = formatDuration(scheduledOutageMins * 60000);
+            document.getElementById('actualOutageVal').textContent = formatDuration(factOutageSec * 1000);
 
             // ==========================================
             // 3. BOUNDARY LABELS
@@ -1166,9 +1251,9 @@
         }
 
         // Reconstruct fact segments from today's events: green (on), yellow (unstable), gray (off)
-        function buildFactSegments(eventsList, currentStatus, currentMins) {
+        function buildFactSegments(eventsList, currentStatus, currentMins, selectedDay = todayKey(), isToday = true) {
             const now = new Date();
-            const kyivDateStr = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' }); // YYYY-MM-DD
+            const kyivDateStr = selectedDay;
             const todayEvents = [];
             let lastEventBeforeToday = null;
 
@@ -1226,8 +1311,8 @@
                 intervals.push({
                     start: 0,
                     end: currentMins,
-                    startDate: new Date(new Date().setHours(0,0,0,0)),
-                    endDate: now,
+                    startDate: new Date(`${selectedDay}T00:00:00+03:00`),
+                    endDate: isToday ? now : new Date(`${selectedDay}T23:59:59+03:00`),
                     durationSec: Math.round(currentMins * 60),
                     status: initialStatus
                 });
@@ -1237,7 +1322,7 @@
                     intervals.push({
                         start: 0,
                         end: firstEv.mins,
-                        startDate: new Date(new Date().setHours(0,0,0,0)),
+                        startDate: new Date(`${selectedDay}T00:00:00+03:00`),
                         endDate: firstEv.rawDate,
                         durationSec: Math.max(1, Math.round(firstEv.mins * 60)),
                         status: initialStatus
@@ -1248,7 +1333,7 @@
                     const ev = todayEvents[i];
                     const nextEv = (i + 1 < todayEvents.length) ? todayEvents[i + 1] : null;
                     const nextMins = nextEv ? nextEv.mins : currentMins;
-                    const nextDate = nextEv ? nextEv.rawDate : now;
+                    const nextDate = nextEv ? nextEv.rawDate : (isToday ? now : new Date(`${selectedDay}T23:59:59+03:00`));
                     const durSec = Math.max(1, Math.round((nextDate - ev.rawDate) / 1000));
 
                     if (nextMins > ev.mins) {
@@ -1325,7 +1410,7 @@
             });
 
             // Future segment from current minute to 24:00
-            if (currentMins < 1440) {
+            if (isToday && currentMins < 1440) {
                 merged.push({ start: currentMins, end: 1440, status: 'future' });
             }
 
