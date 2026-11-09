@@ -256,6 +256,94 @@ def read_power_status(file_path: Optional[str] = None):
 app.register_blueprint(create_api_blueprint(stats_service, read_power_status), url_prefix='/api')
 
 
+def find_effective_power_on_timestamp(
+    loc_id: str,
+    before_ts: datetime,
+    stats_service_inst = None,
+    unstable_delay: int = 180
+) -> Optional[datetime]:
+    """
+    Find the timestamp when power actually became ON, walking back through
+    any short-lived (< unstable_delay) transient instability blips.
+    """
+    srv = stats_service_inst or stats_service
+    if not srv or not hasattr(srv, 'get_recent_events'):
+        return None
+    try:
+        events = srv.get_recent_events(limit=50, location=loc_id)
+        if not events:
+            return None
+        evs = []
+        for e in events:
+            e_ts = e.timestamp
+            if e_ts is not None:
+                if e_ts.tzinfo is None:
+                    e_ts = TIMEZONE.localize(e_ts)
+                if e_ts < before_ts:
+                    evs.append((e_ts, e.status.lower()))
+
+        candidate = None
+        for i in range(len(evs)):
+            e_ts, st = evs[i]
+            if st == 'on':
+                candidate = e_ts
+            elif st == 'unstable':
+                next_ts = evs[i-1][0] if i > 0 else before_ts
+                dur = (next_ts - e_ts).total_seconds()
+                if dur >= unstable_delay:
+                    break
+            elif st == 'off':
+                break
+        return candidate
+    except Exception as ex:
+        logger.warning(f"Failed to find effective power on timestamp for {loc_id}: {ex}")
+        return None
+
+
+def find_effective_power_off_timestamp(
+    loc_id: str,
+    before_ts: datetime,
+    stats_service_inst = None,
+    unstable_delay: int = 180
+) -> Optional[datetime]:
+    """
+    Find the timestamp when power actually went OFF, walking back through
+    any short-lived (< unstable_delay) transient relay delays or blips.
+    """
+    srv = stats_service_inst or stats_service
+    if not srv or not hasattr(srv, 'get_recent_events'):
+        return None
+    try:
+        events = srv.get_recent_events(limit=50, location=loc_id)
+        if not events:
+            return None
+        evs = []
+        for e in events:
+            e_ts = e.timestamp
+            if e_ts is not None:
+                if e_ts.tzinfo is None:
+                    e_ts = TIMEZONE.localize(e_ts)
+                if e_ts < before_ts:
+                    evs.append((e_ts, e.status.lower()))
+
+        candidate = None
+        for i in range(len(evs)):
+            e_ts, st = evs[i]
+            if st == 'off':
+                candidate = e_ts
+            elif st == 'unstable':
+                next_ts = evs[i-1][0] if i > 0 else before_ts
+                dur = (next_ts - e_ts).total_seconds()
+                if dur >= unstable_delay:
+                    break
+            elif st == 'on':
+                break
+        return candidate
+    except Exception as ex:
+        logger.warning(f"Failed to find effective power off timestamp for {loc_id}: {ex}")
+        return None
+
+
 def find_next_outage_for_group(group_id: Optional[str] = 'home') -> Optional[Tuple[str, str, bool]]:
     """Find next scheduled outage for a specific group (Yasno or VOE)."""
     if not group_id:
@@ -578,12 +666,24 @@ def _handle_power_status_update(
                 # In that case, format duration based on the total outage time from prior_off_timestamp.
                 effective_was_unstable = was_unstable and sustained_instability
                 effective_duration_text = duration_text
-                if prior_was_off and prior_off_timestamp:
+                effective_off_ts = None
+                if was_unstable:
+                    effective_off_ts = find_effective_power_off_timestamp(
+                        loc.id,
+                        before_ts=now_ts,
+                        stats_service_inst=stats_service,
+                        unstable_delay=unstable_alert_manager.delay_seconds
+                    )
+                    if effective_off_ts is None and prior_was_off and prior_off_timestamp:
+                        effective_off_ts = prior_off_timestamp
+
+                if effective_off_ts:
                     try:
-                        if prior_off_timestamp.tzinfo is None:
-                            prior_off_timestamp = TIMEZONE.localize(prior_off_timestamp)
-                        outage_dur = now_ts - prior_off_timestamp
-                        effective_duration_text = DurationFormatter.format_duration(outage_dur)
+                        if effective_off_ts.tzinfo is None:
+                            effective_off_ts = TIMEZONE.localize(effective_off_ts)
+                        outage_dur = now_ts - effective_off_ts
+                        if outage_dur.total_seconds() >= 0:
+                            effective_duration_text = DurationFormatter.format_duration(outage_dur)
                     except Exception as e:
                         logger.warning(f"Failed to calculate full outage duration: {e}")
 
@@ -637,21 +737,90 @@ def _handle_power_status_update(
             )
         else:
             # status == 'off'
-            unstable_alert_manager.cancel(loc.id)
+            unstable_alert_was_sent, min_v, max_v = unstable_alert_manager.cancel(loc.id)
             unstable_alert_manager.cancel_stabilization_alert(loc.id)
-            outage_alert_manager.schedule_outage_alert(
-                loc,
-                timestamp=now_ts,
-                duration_text=duration_text,
-                voltage=voltage
-            )
+
+            last_ts = current_status.get('timestamp') if current_status else None
+            unstable_duration_sec = 0.0
+            if last_ts and isinstance(last_ts, datetime):
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=TIMEZONE)
+                if was_unstable:
+                    unstable_duration_sec = max(0.0, (now_ts - last_ts).total_seconds())
+
+            sustained_instability = unstable_alert_was_sent or (was_unstable and unstable_duration_sec >= unstable_alert_manager.delay_seconds)
+
+            # Check previous event before instability to know if light was already OFF or ON beforehand
+            prior_was_off = False
+            prior_was_on = False
+            prior_on_timestamp = None
+            if was_unstable and stats_service:
+                try:
+                    recent_events = stats_service.get_recent_events(limit=20, location=loc.id)
+                    for ev in recent_events:
+                        ev_ts = ev.timestamp
+                        if ev_ts is not None:
+                            if ev_ts.tzinfo is None:
+                                ev_ts = TIMEZONE.localize(ev_ts)
+                            if last_ts and ev_ts >= last_ts:
+                                continue
+                            if ev_ts >= now_ts:
+                                continue
+                        ev_status = ev.status.lower()
+                        if ev_status == 'unstable':
+                            continue
+                        if ev_status == 'off':
+                            prior_was_off = True
+                        elif ev_status == 'on':
+                            prior_was_on = True
+                            prior_on_timestamp = ev.timestamp
+                        break
+                except Exception as ex:
+                    logger.warning(f"Failed to check prior event for {loc.id}: {ex}")
+
+            if was_unstable and prior_was_off and not sustained_instability:
+                # Power was already OFF before this short-lived voltage spike; suppress duplicate outage alert
+                logger.info(
+                    f"Short-lived voltage instability resolved back to off for {loc.id} without notification "
+                    f"(spike lasted {unstable_duration_sec:.1f}s, outage was already active)"
+                )
+            else:
+                effective_duration_text = duration_text
+                effective_on_ts = None
+                if was_unstable:
+                    effective_on_ts = find_effective_power_on_timestamp(
+                        loc.id,
+                        before_ts=now_ts,
+                        stats_service_inst=stats_service,
+                        unstable_delay=unstable_alert_manager.delay_seconds
+                    )
+                    if effective_on_ts is None and prior_was_on and prior_on_timestamp:
+                        effective_on_ts = prior_on_timestamp
+
+                if effective_on_ts:
+                    try:
+                        if effective_on_ts.tzinfo is None:
+                            effective_on_ts = TIMEZONE.localize(effective_on_ts)
+                        power_on_dur = now_ts - effective_on_ts
+                        if power_on_dur.total_seconds() >= 0:
+                            effective_duration_text = DurationFormatter.format_duration(power_on_dur)
+                    except Exception as e:
+                        logger.warning(f"Failed to calculate full power-on duration: {e}")
+
+                outage_alert_manager.schedule_outage_alert(
+                    loc,
+                    timestamp=now_ts,
+                    duration_text=effective_duration_text,
+                    voltage=voltage
+                )
+                if outage_alert_manager.delay_seconds <= 0:
+                    notification_sent = True
+                logger.info(
+                    f"Status changed to off for {loc.id}, Telegram notification delayed by "
+                    f"{outage_alert_manager.delay_seconds}s to filter transient glitches "
+                    f"(effective duration on: {effective_duration_text})"
+                )
             message = None
-            if outage_alert_manager.delay_seconds <= 0:
-                notification_sent = True
-            logger.info(
-                f"Status changed to off for {loc.id}, Telegram notification delayed by "
-                f"{outage_alert_manager.delay_seconds}s to filter transient glitches"
-            )
 
         if message:
             loop = get_or_create_eventloop()
@@ -663,6 +832,8 @@ def _handle_power_status_update(
             loop.run_until_complete(coro)
             notification_sent = True
             logger.info(f"Status changed to {status} for {loc.id}, notification sent")
+            if stats_service and hasattr(stats_service, 'set_notification_state'):
+                stats_service.set_notification_state(loc.id, 'on', timestamp)
 
         # Notify Home Assistant dedicated webhook
         notify_ha_webhook(

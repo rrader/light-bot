@@ -278,8 +278,11 @@ class UnstableAlertManager:
         keyboard = get_webapp_inline_keyboard(location_id)
         logger.info(f"Power remained stable for one hour at {location_id}; sending recovery notice")
         delivered = self._send_telegram(message, target_chat, reply_markup=keyboard)
-        if delivered and self.stats_service and hasattr(self.stats_service, 'remove_pending_stabilization_alert'):
-            self.stats_service.remove_pending_stabilization_alert(location_id)
+        if delivered:
+            if self.stats_service and hasattr(self.stats_service, 'remove_pending_stabilization_alert'):
+                self.stats_service.remove_pending_stabilization_alert(location_id)
+            if self.stats_service and hasattr(self.stats_service, 'set_notification_state'):
+                self.stats_service.set_notification_state(location_id, 'on', recovery_timestamp)
         elif not delivered and self.stats_service and hasattr(self.stats_service, 'get_pending_stabilization_alerts'):
             retry_at = _now() + timedelta(seconds=60)
             with self._lock:
@@ -339,6 +342,8 @@ class UnstableAlertManager:
             f"{count} cutoffs in 1h, extreme voltage: {extreme_voltage}V"
         )
         self._send_telegram(message, target_chat, reply_markup=keyboard)
+        if self.stats_service and hasattr(self.stats_service, 'set_notification_state'):
+            self.stats_service.set_notification_state(location_id, 'unstable', timestamp)
 
     def _get_bot(self):
         return self.telegram_bot
@@ -388,6 +393,8 @@ class UnstableAlertManager:
         )
         keyboard = get_webapp_inline_keyboard(location_id)
         self._send_telegram(message, target_chat, reply_markup=keyboard)
+        if self.stats_service and hasattr(self.stats_service, 'set_notification_state'):
+            self.stats_service.set_notification_state(location_id, 'unstable', start_time)
 
     def calculate_extreme_voltage(
         self,

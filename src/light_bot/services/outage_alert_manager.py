@@ -25,10 +25,12 @@ class OutageAlertManager:
     def __init__(
         self,
         delay_seconds: int = 40,
-        telegram_bot = None
+        telegram_bot = None,
+        stats_service = None
     ):
         self.delay_seconds = delay_seconds
         self._telegram_bot = telegram_bot
+        self._stats_service = stats_service
         self._lock = threading.Lock()
         self._states: Dict[str, dict] = {}
 
@@ -39,6 +41,16 @@ class OutageAlertManager:
         try:
             import light_bot.core.server as srv
             return getattr(srv, 'telegram_bot', None)
+        except Exception:
+            return None
+
+    @property
+    def stats_service(self):
+        if self._stats_service is not None:
+            return self._stats_service
+        try:
+            import light_bot.core.server as srv
+            return getattr(srv, 'stats_service', None)
         except Exception:
             return None
 
@@ -125,6 +137,8 @@ class OutageAlertManager:
         target_chat = location.channel_id or (bot.channel_id if bot else None)
         keyboard = get_webapp_inline_keyboard(location.id)
         self._send_telegram(message, target_chat, reply_markup=keyboard)
+        if self.stats_service and hasattr(self.stats_service, 'set_notification_state'):
+            self.stats_service.set_notification_state(location.id, 'off', start_time)
 
     def _on_timer_fired(self, location_id: str):
         """Callback when outage persisted for delay_seconds"""

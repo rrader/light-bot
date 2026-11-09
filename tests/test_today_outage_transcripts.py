@@ -509,3 +509,95 @@ def test_new_instability_cancels_persisted_stabilization_after_restart(replay, m
     replay.clock.current = at("2026-11-05T05:25:40.128139+02:00")
     timer.fire()
     assert all("Напруга стабілізувалась!" not in message for message in sent_messages(replay))
+
+
+def test_kyiv_intermediate_unstable_does_not_corrupt_power_on_duration(replay):
+    """
+    Regression test for Telegram duration calculation:
+    When power was ON for 6h15m, and drops through a brief 20s 'unstable' transition
+    (Zigbee socket drops 20s before panel voltmeter), the outage alert must report
+    'Світло було: 6 годин 15 хвилин', NOT '19 секунд' or '20 секунд'.
+    """
+    seed_state(
+        replay, "home", "on", at("2026-11-09T01:50:00.000000+02:00"),
+        voltage=242.0, before_relay=True, after_relay=True, source="ha",
+    )
+
+    # 1. Brief intermediate unstable transition (20s) before total cutoff
+    post_status(
+        replay, "home", at("2026-11-09T08:05:00.000000+02:00"), "unstable",
+        voltage=0.0, before_relay=True, after_relay=False, source="ha",
+    )
+    # 2. Total cutoff 20s later
+    post_status(
+        replay, "home", at("2026-11-09T08:05:20.000000+02:00"), "off",
+        voltage=0.0, before_relay=False, after_relay=False, source="ha",
+    )
+
+    # Advance clock by 40s debounce window so outage timer fires
+    advance_to(replay, at("2026-11-09T08:06:00.000000+02:00"))
+
+    messages = sent_messages(replay)
+    assert len(messages) == 1
+    assert "Світло зникло" in messages[0]
+    assert "09.11.2026 08:05:20" in messages[0]
+    assert "Світло було" in messages[0]
+    assert "6 годин 15 хвилин" in messages[0]
+    assert "19 секунд" not in messages[0]
+    assert "20 секунд" not in messages[0]
+
+
+def test_ongoing_outage_brief_unstable_spike_does_not_send_duplicate_off_alert(replay):
+    """
+    During an ongoing blackout, a brief transient voltage flicker on the grid (< 180s)
+    must NOT trigger a duplicate 'Світло зникло' Telegram message when it returns to off.
+    """
+    seed_state(
+        replay, "home", "off", at("2026-11-06T02:00:00.000000+02:00"),
+        voltage=0.0, before_relay=False, after_relay=False, source="ha",
+    )
+
+    # Grid voltage flickers briefly on input, but relay never engages
+    post_status(
+        replay, "home", at("2026-11-06T02:30:00.000000+02:00"), "unstable",
+        voltage=240.0, before_relay=True, after_relay=False, source="ha",
+    )
+    # Returns to off 20s later
+    post_status(
+        replay, "home", at("2026-11-06T02:30:20.000000+02:00"), "off",
+        voltage=0.0, before_relay=False, after_relay=False, source="ha",
+    )
+
+    advance_to(replay, at("2026-11-06T02:35:00.000000+02:00"))
+    messages = sent_messages(replay)
+    assert len(messages) == 0
+
+
+def test_power_on_with_intermediate_suppressed_spikes_preserves_full_duration(replay):
+    """
+    Multiple suppressed transient spikes (< 180s) during a sustained power-on period
+    must not truncate the power-on duration reported when an outage finally occurs.
+    """
+    seed_state(
+        replay, "home", "on", at("2026-11-09T01:50:00.000000+02:00"),
+        voltage=242.0, before_relay=True, after_relay=True, source="ha",
+    )
+
+    # Spike 1: 20s dip at 04:33
+    post_status(replay, "home", at("2026-11-09T04:33:00.000000+02:00"), "unstable", voltage=246.0, before_relay=True, after_relay=False, source="ha")
+    post_status(replay, "home", at("2026-11-09T04:33:20.000000+02:00"), "on", voltage=246.0, before_relay=True, after_relay=True, source="ha")
+
+    # Spike 2: 20s dip at 05:20
+    post_status(replay, "home", at("2026-11-09T05:20:00.000000+02:00"), "unstable", voltage=241.0, before_relay=True, after_relay=False, source="ha")
+    post_status(replay, "home", at("2026-11-09T05:20:20.000000+02:00"), "on", voltage=241.0, before_relay=True, after_relay=True, source="ha")
+
+    # Real outage at 08:05:00 -> 08:05:20
+    post_status(replay, "home", at("2026-11-09T08:05:00.000000+02:00"), "unstable", voltage=0.0, before_relay=True, after_relay=False, source="ha")
+    post_status(replay, "home", at("2026-11-09T08:05:20.000000+02:00"), "off", voltage=0.0, before_relay=False, after_relay=False, source="ha")
+
+    advance_to(replay, at("2026-11-09T08:06:00.000000+02:00"))
+    messages = sent_messages(replay)
+    assert len(messages) == 1
+    assert "Світло було" in messages[0]
+    assert "6 годин 15 хвилин" in messages[0]
+

@@ -99,6 +99,16 @@ class StatsService:
                         max_voltage REAL
                     )
                 ''')
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS location_notification_state (
+                        location TEXT PRIMARY KEY,
+                        last_notified_status TEXT NOT NULL,
+                        last_notified_timestamp TEXT NOT NULL,
+                        last_power_on_timestamp TEXT,
+                        last_power_off_timestamp TEXT,
+                        updated_at TEXT NOT NULL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
@@ -345,6 +355,123 @@ class StatsService:
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to remove pending stabilization alert for {location}: {e}")
+
+    def get_notification_state(self, location: str) -> Optional[Dict[str, Any]]:
+        """Get the persisted notification state for a location, bootstrapping if needed."""
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''SELECT last_notified_status, last_notified_timestamp, 
+                              last_power_on_timestamp, last_power_off_timestamp 
+                       FROM location_notification_state WHERE location = ?''',
+                    (location,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    def parse_ts(val):
+                        if not val:
+                            return None
+                        try:
+                            dt = datetime.fromisoformat(val)
+                            if dt.tzinfo is None:
+                                dt = TIMEZONE.localize(dt)
+                            return dt
+                        except Exception:
+                            return None
+
+                    return {
+                        'last_notified_status': row[0],
+                        'last_notified_timestamp': parse_ts(row[1]),
+                        'last_power_on_timestamp': parse_ts(row[2]),
+                        'last_power_off_timestamp': parse_ts(row[3]),
+                    }
+
+                # Bootstrap from recent power events if table is empty
+                events = self.get_recent_events(limit=50, location=location)
+                if not events:
+                    return None
+
+                last_on = None
+                last_off = None
+                for ev in events:
+                    if ev.status == 'on' and last_on is None:
+                        last_on = ev.timestamp
+                    elif ev.status == 'off' and last_off is None:
+                        last_off = ev.timestamp
+                    if last_on and last_off:
+                        break
+
+                latest_status = events[0].status
+                latest_ts = events[0].timestamp
+                state = {
+                    'last_notified_status': latest_status,
+                    'last_notified_timestamp': latest_ts,
+                    'last_power_on_timestamp': last_on,
+                    'last_power_off_timestamp': last_off,
+                }
+                self.set_notification_state(
+                    location,
+                    latest_status,
+                    latest_ts,
+                    last_power_on=last_on,
+                    last_power_off=last_off
+                )
+                return state
+        except Exception as e:
+            logger.error(f"Failed to get notification state for {location}: {e}")
+            return None
+
+    def set_notification_state(
+        self,
+        location: str,
+        status: str,
+        timestamp: datetime,
+        last_power_on: Optional[datetime] = None,
+        last_power_off: Optional[datetime] = None
+    ):
+        """Update or insert the last notified state for a location."""
+        try:
+            if timestamp.tzinfo is None:
+                timestamp = TIMEZONE.localize(timestamp)
+            ts_str = timestamp.isoformat()
+            now_str = datetime.now(TIMEZONE).isoformat()
+
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT last_power_on_timestamp, last_power_off_timestamp FROM location_notification_state WHERE location = ?',
+                    (location,)
+                )
+                row = cursor.fetchone()
+                curr_on = row[0] if row else None
+                curr_off = row[1] if row else None
+
+                if status == 'on':
+                    on_str = ts_str
+                    off_str = last_power_off.isoformat() if last_power_off else curr_off
+                elif status == 'off':
+                    on_str = last_power_on.isoformat() if last_power_on else curr_on
+                    off_str = ts_str
+                else:
+                    on_str = last_power_on.isoformat() if last_power_on else curr_on
+                    off_str = last_power_off.isoformat() if last_power_off else curr_off
+
+                cursor.execute(
+                    '''INSERT INTO location_notification_state 
+                       (location, last_notified_status, last_notified_timestamp, last_power_on_timestamp, last_power_off_timestamp, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(location) DO UPDATE SET 
+                           last_notified_status = excluded.last_notified_status,
+                           last_notified_timestamp = excluded.last_notified_timestamp,
+                           last_power_on_timestamp = excluded.last_power_on_timestamp,
+                           last_power_off_timestamp = excluded.last_power_off_timestamp,
+                           updated_at = excluded.updated_at''',
+                    (location, status, ts_str, on_str, off_str, now_str)
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to set notification state for {location}: {e}")
 
     def get_voltage_extrema(
         self,
