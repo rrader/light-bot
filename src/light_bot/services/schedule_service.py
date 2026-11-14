@@ -9,6 +9,7 @@ from light_bot.api.yasno import client as yasno_client, YasnoScheduleResponse
 from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.services.multi_group_schedule_manager import MultiGroupScheduleManager
 from light_bot.services.stats_service import StatsService
+from light_bot.services.address_group_monitor import AddressGroupMonitor
 from light_bot.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
@@ -76,6 +77,7 @@ class ScheduleService:
             ai_explainer=self.ai_explainer,
             stats_service=self.stats_service,
         )
+        self.address_group_monitor = AddressGroupMonitor(self.bot, YASNO_GROUP_CONFIGS)
 
         # Composite schedule client supporting multiple providers (Yasno, VOE)
         from light_bot.api.composite_client import CompositeScheduleClient
@@ -190,6 +192,8 @@ class ScheduleService:
         logger.info(f"Today monitoring window: {SCHEDULE_TODAY_START_HOUR}-{SCHEDULE_TODAY_END_HOUR}h")
         logger.info(f"Tomorrow monitoring window: {SCHEDULE_TOMORROW_START_HOUR}-{SCHEDULE_TOMORROW_END_HOUR}h")
         self.monitoring = True
+        if self.address_group_monitor.enabled:
+            logger.info("Yasno address group mismatch alerts enabled")
 
         while self.monitoring:
             try:
@@ -229,6 +233,11 @@ class ScheduleService:
                         logger.error("Failed to get schedule data")
                 else:
                     logger.info("Skipping schedule checks immediately after rollover (allowing API to update)")
+
+                try:
+                    await self.address_group_monitor.check_if_due()
+                except Exception as e:
+                    logger.error("Error checking Yasno address group mapping (will retry): %s", e)
 
                 # Update the last check date
                 self.multi_group_manager.update_last_check_dates(current_date)

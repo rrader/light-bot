@@ -207,6 +207,13 @@ OUTAGE_WARNING_CHECK_INTERVAL = int(os.getenv('OUTAGE_WARNING_CHECK_INTERVAL', 3
 # Default: 21600 (6 hours), Set to 0 to disable periodic resolution
 GROUP_RESOLUTION_INTERVAL = int(os.getenv('GROUP_RESOLUTION_INTERVAL', 21600))
 
+# Alert if Yasno's address lookup no longer matches the group being monitored.
+YASNO_ADDRESS_GROUP_MONITOR_URL = os.getenv('YASNO_ADDRESS_GROUP_MONITOR_URL')
+YASNO_ADDRESS_GROUP_ALERT_CHAT_ID = os.getenv('YASNO_ADDRESS_GROUP_ALERT_CHAT_ID')
+if YASNO_ADDRESS_GROUP_ALERT_CHAT_ID and YASNO_ADDRESS_GROUP_ALERT_CHAT_ID.lstrip('-').isdigit():
+    YASNO_ADDRESS_GROUP_ALERT_CHAT_ID = int(YASNO_ADDRESS_GROUP_ALERT_CHAT_ID)
+YASNO_ADDRESS_GROUP_CHECK_INTERVAL = int(os.getenv('YASNO_ADDRESS_GROUP_CHECK_INTERVAL', 3600))
+
 # OpenAI API Configuration (optional - for AI explanations of schedule changes)
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # Optional: OpenAI API key
 OPENAI_MODEL = os.getenv('OPENAI_MODEL', 'gpt-6-luna')  # OpenAI model for explanations
