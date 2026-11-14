@@ -23,7 +23,8 @@ def run_schedule_monitoring():
         # Run both monitoring loops in parallel
         loop.run_until_complete(asyncio.gather(
             schedule_service.schedule_monitoring_loop(),
-            schedule_service.outage_warning_loop()
+            schedule_service.outage_warning_loop(),
+            schedule_service.operational_alerts.run(lambda: schedule_service.monitoring),
         ))
     except Exception as e:
         logger.error(f"Schedule monitoring error: {e}")

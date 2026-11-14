@@ -10,6 +10,10 @@ from light_bot.formatters.schedule_formatter import ScheduleFormatter
 from light_bot.services.multi_group_schedule_manager import MultiGroupScheduleManager
 from light_bot.services.stats_service import StatsService
 from light_bot.services.address_group_monitor import AddressGroupMonitor
+from light_bot.services.operational_alerts import (
+    MonitoredTelegramBot,
+    OperationalAlertMonitor,
+)
 from light_bot.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_SCHEDULE_CHANNEL_ID,
@@ -43,10 +47,14 @@ class ScheduleService:
     """
 
     def __init__(self, stats_service: Optional[StatsService] = None):
-        self.bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        raw_bot = Bot(token=TELEGRAM_BOT_TOKEN)
+        self.stats_service = stats_service or StatsService()
+        self.operational_alerts = OperationalAlertMonitor(raw_bot, self.stats_service)
+        # Schedule and operational alert senders share a proxy so PTB's slotted Bot
+        # instance remains untouched while delivery failures can be tracked.
+        self.bot = MonitoredTelegramBot(raw_bot, self.operational_alerts)
         self.formatter = ScheduleFormatter()
         self.monitoring = False
-        self.stats_service = stats_service or StatsService()
 
         # Schedule data cache with thread safety
         self._cache_lock = asyncio.Lock()
@@ -77,7 +85,9 @@ class ScheduleService:
             ai_explainer=self.ai_explainer,
             stats_service=self.stats_service,
         )
-        self.address_group_monitor = AddressGroupMonitor(self.bot, YASNO_GROUP_CONFIGS)
+        self.address_group_monitor = AddressGroupMonitor(
+            self.bot, YASNO_GROUP_CONFIGS, self.operational_alerts
+        )
 
         # Composite schedule client supporting multiple providers (Yasno, VOE)
         from light_bot.api.composite_client import CompositeScheduleClient
@@ -219,6 +229,9 @@ class ScheduleService:
                     )
 
                     if schedule_data:
+                        await self.operational_alerts.check_schedule(
+                            schedule_data, YASNO_GROUP_CONFIGS
+                        )
                         # Check all groups
                         try:
                             await self.multi_group_manager.check_today_schedules(schedule_data)

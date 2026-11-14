@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 class AddressGroupMonitor:
     """Periodically compare Yasno's address mapping with Light Bot's group."""
 
-    def __init__(self, bot: Bot, group_configs: Iterable[GroupConfig]):
+    def __init__(self, bot: Bot, group_configs: Iterable[GroupConfig], operational_alerts=None):
         self.bot = bot
+        self.operational_alerts = operational_alerts
         self.group_configs = list(group_configs)
         self.enabled = bool(
             YASNO_ADDRESS_GROUP_MONITOR_URL
@@ -65,7 +66,12 @@ class AddressGroupMonitor:
             observed_group = f"{int(data['group'])}.{int(data['subgroup'])}"
         except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
             logger.warning("Could not read Yasno address group: %s", exc)
+            if self.operational_alerts:
+                await self.operational_alerts.record_address_lookup(False)
             return
+
+        if self.operational_alerts:
+            await self.operational_alerts.record_address_lookup(True)
 
         expected_group = home_config.group
         if observed_group == expected_group:
