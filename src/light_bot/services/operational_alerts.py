@@ -47,7 +47,7 @@ class OperationalAlertMonitor:
         self._schedule_failures = 0
         self._schedule_missing = 0
         self._address_failures = 0
-        self._active: set[str] = set()
+        self._active: set[str] = self.stats_service.get_active_operational_alerts()
         self._last_telemetry_check: Optional[datetime] = None
         self._telegram_failures = 0
         self._telegram_recovery_pending = False
@@ -170,6 +170,11 @@ class OperationalAlertMonitor:
             await self.bot.send_message(chat_id=self.chat_id, text=message)
         except Exception:
             logger.exception("Failed to send operational alert %s", key)
+            return
+        if not self.stats_service.set_operational_alert_active(key, active):
+            # The Telegram transition was delivered, but retaining the old in-memory state
+            # lets the next check retry persistence instead of silently forgetting it.
+            logger.error("Telegram alert %s sent but state transition was not persisted", key)
             return
         if active:
             self._active.add(key)

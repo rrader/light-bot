@@ -109,9 +109,50 @@ class StatsService:
                         updated_at TEXT NOT NULL
                     )
                 ''')
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS operational_alert_state (
+                        alert_key TEXT PRIMARY KEY,
+                        active INTEGER NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                ''')
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+
+    def get_active_operational_alerts(self) -> set[str]:
+        """Return operational alerts that were active before this process started."""
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    'SELECT alert_key FROM operational_alert_state WHERE active = 1'
+                ).fetchall()
+                return {row[0] for row in rows}
+        except Exception as e:
+            logger.error(f"Failed to load operational alert state: {e}")
+            return set()
+
+    def set_operational_alert_active(self, alert_key: str, active: bool) -> bool:
+        """Persist an operational alert transition; return whether it was saved."""
+        try:
+            with self._get_conn() as conn:
+                if active:
+                    conn.execute(
+                        '''INSERT INTO operational_alert_state (alert_key, active, updated_at)
+                           VALUES (?, 1, ?)
+                           ON CONFLICT(alert_key) DO UPDATE SET active = 1, updated_at = excluded.updated_at''',
+                        (alert_key, datetime.now(TIMEZONE).isoformat()),
+                    )
+                else:
+                    conn.execute(
+                        'DELETE FROM operational_alert_state WHERE alert_key = ?',
+                        (alert_key,),
+                    )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to persist operational alert state for {alert_key}: {e}")
+            return False
 
     def get_last_button_message_id(self, chat_id: str | int) -> Optional[int]:
         """Get the message_id that currently has the active WebApp button for chat_id"""
