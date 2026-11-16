@@ -62,14 +62,14 @@ class OperationalAlertMonitor:
             self._address_failures = 0
             await self._set_alert(
                 "yasno_address_api", False,
-                "✅ API адрес Yasno знову відповідає.",
+                "✅ API визначення групи за адресою «вул. Воскресенська, 2В, Київ» у Yasno знову відповідає.",
             )
             return
         self._address_failures += 1
         if self._address_failures >= self.FAILURE_THRESHOLD:
             await self._set_alert(
                 "yasno_address_api", True,
-                "🔴 API визначення групи Yasno не відповідає "
+                "🔴 API визначення групи за адресою «вул. Воскресенська, 2В, Київ» у Yasno не відповідає "
                 f"{self._address_failures} перевірки поспіль.",
             )
 
