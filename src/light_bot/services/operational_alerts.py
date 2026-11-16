@@ -7,7 +7,11 @@ from typing import Optional
 
 from telegram import Bot
 
-from light_bot.config import TIMEZONE, YASNO_ADDRESS_GROUP_ALERT_CHAT_ID
+from light_bot.config import (
+    TIMEZONE,
+    YASNO_ADDRESS_GROUP_ALERT_CHAT_ID,
+    YASNO_ADDRESS_GROUP_MONITOR_URL,
+)
 from light_bot.services.stats_service import StatsService
 
 logger = logging.getLogger(__name__)
@@ -62,15 +66,16 @@ class OperationalAlertMonitor:
             self._address_failures = 0
             await self._set_alert(
                 "yasno_address_api", False,
-                "✅ API визначення групи за адресою «вул. Воскресенська, 2В, Київ» у Yasno знову відповідає.",
+                "✅ API Yasno для визначення групи знову відповідає.",
             )
             return
         self._address_failures += 1
         if self._address_failures >= self.FAILURE_THRESHOLD:
             await self._set_alert(
                 "yasno_address_api", True,
-                "🔴 API визначення групи за адресою «вул. Воскресенська, 2В, Київ» у Yasno не відповідає "
-                f"{self._address_failures} перевірки поспіль.",
+                "🔴 API Yasno для визначення групи не відповідає "
+                f"{self._address_failures} перевірки поспіль.\n"
+                f"URL запиту: {YASNO_ADDRESS_GROUP_MONITOR_URL}",
             )
 
     async def record_telegram_success(self, send_raw) -> None:
