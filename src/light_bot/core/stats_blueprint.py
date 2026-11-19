@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, request
 from light_bot.services.stats_service import StatsService
 from light_bot.formatters.duration_formatter import DurationFormatter
 
@@ -26,9 +26,12 @@ def create_stats_blueprint(stats_service: StatsService):
 
     @bp.route('/app')
     @bp.route('/app/<location_id>')
+    @bp.route('/radiator')
     def webapp(location_id=None):
         loc = (location_id or '').lower()
-        if loc in ['kyiv', 'kiev', 'home', '']:
+        if request.path == '/radiator':
+            loc = 'radiator'
+        elif loc in ['kyiv', 'kiev', 'home', '']:
             loc = 'home'
         elif loc in ['vinnytsia', 'vinnitsa', 'vn']:
             loc = 'vinnytsia'

@@ -91,7 +91,7 @@ The Flask server will start on port 5000 (or your configured port).
 
 ### Nursery radiator Mini App panel
 
-The Mini App at `/app` shows the nursery radiator graph alongside apartment electricity status. Its public `GET /api/nursery-radiator` endpoint proxies an allowlisted set of Home Assistant history data (radiator temperature, heating state/trend, and out-of-range voltage samples). It supports custom `start` and `end` Unix timestamps up to 48 hours. If Home Assistant or Recorder is unavailable, the endpoint responds with HTTP 503 and the Mini App displays a temporary-unavailability message while the electricity panel remains usable.
+The dedicated radiator screen at `/radiator` is opened from the `@power_po2_bot` Mini App with `startapp=radiator`; the regular `/app` electricity page does not show radiator data. The public `GET /api/nursery-radiator` endpoint proxies an allowlisted set of Home Assistant history data (radiator temperature, heating state/trend, and out-of-range voltage samples). It supports custom `start` and `end` Unix timestamps up to 48 hours. If Home Assistant or Recorder is unavailable, the endpoint responds with HTTP 503 and the radiator screen displays a temporary-unavailability message.
 
 ### Local Router Setup (Monitoring Script)
 
