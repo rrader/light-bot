@@ -769,7 +769,7 @@
             const safe = String(text).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
             return `<text x="${x}" y="${y}" font-size="${size}" fill="${color}" font-weight="${weight}" text-anchor="${anchor}">${safe}</text>`;
         }
-        function drawRadiatorChart(history, events, startMs, endMs) {
+        function drawRadiatorChart(history, events, voltageExcursions, startMs, endMs) {
             const svg = document.getElementById('radiatorChart');
             const W=1400,H=850,L=104,R=1360,T=116,B=630,GY=700,BH=24, x=t=>L+(t-startMs)/(endMs-startMs)*(R-L);
             const series = key => history[key] || [];
@@ -793,9 +793,7 @@
             for(let t=startMs;t<endMs;t+=2*3600000){const xx=x(t);out.push(`<line x1="${xx}" y1="${T}" x2="${xx}" y2="${B}" stroke="#eef0f4"/>`,svgText(xx,670,new Date(t).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}),13,'#667085',400,'middle'));}
             const eventsSorted=(events||[]).filter(e=>e.status&&e.timestamp).map(e=>({t:new Date(e.timestamp).getTime(),s:e.status})).filter(e=>e.t<=endMs).sort((a,b)=>a.t-b.t); let power=eventsSorted.filter(e=>e.t<=startMs).at(-1)?.s||'unknown';cursor=startMs;const pseg=[];for(const e of eventsSorted){if(e.t<=startMs)continue;if(e.t>=endMs)break;pseg.push([cursor,e.t,power]);cursor=e.t;power=e.s;}pseg.push([cursor,endMs,power]);
             for(const [a,b,s] of pseg)out.push(`<rect x="${x(a)}" y="${GY}" width="${Math.max(1,x(b)-x(a))}" height="${BH}" fill="${s==='on'?'#f4c542':'#98a2b3'}"/>`);
-            const vp=series('voltage').slice().sort((a,b)=>new Date(a.time)-new Date(b.time)).map(p=>[new Date(p.time).getTime(),Number(p.state)]); let excursions=[];let ex=null;
-            for(let i=0;i<vp.length;i++){const [at,v]=vp[i],next=vp[i+1]?.[0]??endMs,stop=Math.min(next,at+180000,endMs),side=v<207?'low':v>253?'high':null;if(at>=endMs||!Number.isFinite(v)||!side||stop<=Math.max(at,startMs)){if(ex){excursions.push(ex);ex=null;}continue;}const aa=Math.max(at,startMs);if(ex&&ex.side===side&&Math.abs(ex.b-aa)<1){ex.b=stop;ex.ext=side==='low'?Math.min(ex.ext,v):Math.max(ex.ext,v);}else{if(ex)excursions.push(ex);ex={a:aa,b:stop,side,ext:v};}if(stop<next){excursions.push(ex);ex=null;}}
-            if(ex)excursions.push(ex);let labels=[];excursions=excursions.filter(e=>e.b>startMs&&e.a<endMs);for(const e of excursions){out.push(`<rect x="${x(e.a)}" y="${T}" width="${Math.max(2,x(e.b)-x(e.a))}" height="${B-T}" fill="url(#voltageHatch)"/><line x1="${x(e.a)}" y1="${T}" x2="${x(e.a)}" y2="${B}" stroke="#dc2626"/><line x1="${x(e.b)}" y1="${T}" x2="${x(e.b)}" y2="${B}" stroke="#dc2626"/>`);let row=0;while(labels.some(l=>Math.abs(l.x-x(e.a))<76&&l.row===row))row++;labels.push({x:x(e.a),row});out.push(`<rect x="${x(e.a)-40}" y="${T+4+row*21}" width="80" height="19" rx="4" fill="#fff" stroke="#fca5a5"/>`,svgText(x(e.a),T+18+row*21,`${e.side==='low'?'min':'max'} ${e.ext.toFixed(0)} V`,12,'#b42318',700,'middle'));}
+            let labels=[];for(const item of (voltageExcursions||[])){const e={a:new Date(item.start).getTime(),b:new Date(item.end).getTime(),side:item.side,ext:Number(item.extreme)};if(e.b<=startMs||e.a>=endMs)continue;out.push(`<rect x="${x(e.a)}" y="${T}" width="${Math.max(2,x(e.b)-x(e.a))}" height="${B-T}" fill="url(#voltageHatch)"/><line x1="${x(e.a)}" y1="${T}" x2="${x(e.a)}" y2="${B}" stroke="#dc2626"/><line x1="${x(e.b)}" y1="${T}" x2="${x(e.b)}" y2="${B}" stroke="#dc2626"/>`);let row=0;while(labels.some(l=>Math.abs(l.x-x(e.a))<76&&l.row===row))row++;labels.push({x:x(e.a),row});out.push(`<rect x="${x(e.a)-40}" y="${T+4+row*21}" width="80" height="19" rx="4" fill="#fff" stroke="#fca5a5"/>`,svgText(x(e.a),T+18+row*21,`${e.side==='low'?'min':'max'} ${e.ext.toFixed(0)} V`,12,'#b42318',700,'middle'));}
             const poly=temps.filter(p=>new Date(p.time)>=startMs&&new Date(p.time)<=endMs).map(p=>`${x(new Date(p.time))},${y(Number(p.state))}`).join(' ');if(poly)out.push(`<polyline points="${poly}" fill="none" stroke="#e4572e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>`);
             out.push(svgText(L-14,GY+17,'МЕРЕЖА',12,'#667085',700,'end'),`<rect x="${L}" y="${GY}" width="${R-L}" height="${BH}" rx="4" fill="none" stroke="#d0d5dd"/>`,'<circle cx="115" cy="748" r="5" fill="#f4c542"/>',svgText(128,753,'Світло є',12,'#667085'),'<circle cx="230" cy="748" r="5" fill="#98a2b3"/>',svgText(243,753,'Живлення відсутнє',12,'#667085'),svgText(L,790,'Напруга: вольтметр щитка перед реле; норма 207–253 В. Світло за історією Light Bot.',11,'#98a2b3'));
             svg.innerHTML=out.join('');
@@ -836,7 +834,7 @@
                 document.getElementById('radiatorEnd').value=toDateTimeLocal(endMs);
                 document.getElementById('radiatorRangeLabel').textContent=`Проміжок: ${new Date(startMs).toLocaleString('uk-UA')} – ${new Date(endMs).toLocaleString('uk-UA')}`;
                 let events=[];try{const er=await fetch(`/api/events?limit=1000&location=home`,{cache:'no-store'});if(er.ok)events=await er.json();}catch(_){}
-                drawRadiatorChart(data.history || {}, events, startMs, endMs);
+                drawRadiatorChart(data.history || {}, events, data.voltage_excursions || [], startMs, endMs);
             } catch (error) {
                 document.getElementById('radiatorTemp').textContent = '—';
                 document.getElementById('radiatorHeating').textContent = 'НЕДОСТУПНО';

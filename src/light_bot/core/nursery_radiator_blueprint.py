@@ -3,6 +3,7 @@ import logging
 import os
 import threading
 import time
+import math
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -18,6 +19,48 @@ ENTITIES = {
 }
 _cache_lock = threading.Lock()
 _cache = {"until": 0.0, "value": None}
+
+
+def _voltage_excursions(points, start, end):
+    """Project meter history down to only out-of-range intervals and extrema."""
+    result, current = [], None
+    def flush():
+        nonlocal current
+        if current and current["end"] > current["start"]:
+            result.append(current)
+        current = None
+    parsed = []
+    for point in points:
+        try:
+            value = float(point["state"])
+            stamp = datetime.fromisoformat(point["time"].replace("Z", "+00:00")).timestamp()
+            if math.isfinite(value):
+                parsed.append((stamp, value))
+        except (TypeError, ValueError, KeyError):
+            continue
+    for index, (stamp, value) in enumerate(parsed):
+        next_stamp = parsed[index + 1][0] if index + 1 < len(parsed) else end
+        stop = min(next_stamp, stamp + 180, end)
+        left = max(stamp, start)
+        side = "low" if value < 207 else "high" if value > 253 else None
+        if not side or stop <= left:
+            flush()
+            continue
+        if current and current["side"] == side and abs(current["end"] - left) < 1:
+            current["end"] = stop
+            current["extreme"] = min(current["extreme"], value) if side == "low" else max(current["extreme"], value)
+        else:
+            flush()
+            current = {"start": max(left, start), "end": stop, "side": side, "extreme": value}
+        if stop < next_stamp:
+            flush()
+    flush()
+    return [
+        {"start": datetime.fromtimestamp(x["start"], timezone.utc).isoformat(),
+         "end": datetime.fromtimestamp(x["end"], timezone.utc).isoformat(),
+         "side": x["side"], "extreme": round(x["extreme"], 1)}
+        for x in result if x["end"] > start and x["start"] < end
+    ]
 
 
 def create_nursery_radiator_blueprint():
@@ -87,8 +130,11 @@ def create_nursery_radiator_blueprint():
                     before = [point for point in history[key] if datetime.fromisoformat(point["time"].replace("Z", "+00:00")) < start_dt]
                     within = [point for point in history[key] if datetime.fromisoformat(point["time"].replace("Z", "+00:00")) >= start_dt]
                     history[key] = ([before[-1]] if before else []) + within
-            states = {key: series[-1] for key, series in history.items() if key != "voltage" and series}
+            voltage_excursions = _voltage_excursions(history["voltage"], start_dt.timestamp(), end_dt.timestamp())
+            history.pop("voltage", None)
+            states = {key: series[-1] for key, series in history.items() if series}
             result = {"available": True, "states": states, "history": history,
+                      "voltage_excursions": voltage_excursions,
                       "range": {"start": start_dt.isoformat(), "end": end_dt.isoformat(), "hours": hours},
                       "updated": datetime.now(timezone.utc).isoformat()}
             with _cache_lock:
