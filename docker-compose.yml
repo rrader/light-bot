@@ -17,6 +17,8 @@ services:
       # Server configuration
       - FLASK_PORT=5000
       - API_TOKEN=${API_TOKEN}
+      - HA_API_URL=${HA_API_URL:-https://ha.rmn.pp.ua}
+      - HA_API_TOKEN=${HA_API_TOKEN}
       - POWER_STATUS_FILE=/data/power_status.txt
       - LAST_STATUS_FILE=/data/last_status.txt
 

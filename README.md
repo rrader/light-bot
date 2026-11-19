@@ -33,11 +33,14 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_CHANNEL_ID=@your_channel_username_or_id
 FLASK_PORT=5000
 API_TOKEN=your_secure_api_token_here
+HA_API_URL=https://ha.rmn.pp.ua
+HA_API_TOKEN=your_home_assistant_long_lived_access_token
 POWER_STATUS_FILE=power_status.txt
 ```
 
 **Important:**
 - Generate a secure API token: `openssl rand -hex 32`
+- The optional radiator Mini App panel needs a Home Assistant token in the server `.env`; it is only used server-side and must never be committed.
 - The router script needs the API_TOKEN and the remote server URL
 - Use the same API_TOKEN in both router script and server `.env`
 
@@ -85,6 +88,10 @@ python main.py
 ```
 
 The Flask server will start on port 5000 (or your configured port).
+
+### Nursery radiator Mini App panel
+
+The Mini App at `/app` shows the nursery radiator graph alongside apartment electricity status. Its public `GET /api/nursery-radiator` endpoint proxies an allowlisted set of Home Assistant history data (radiator temperature, heating state/trend, and out-of-range voltage samples). It supports custom `start` and `end` Unix timestamps up to 48 hours. If Home Assistant or Recorder is unavailable, the endpoint responds with HTTP 503 and the Mini App displays a temporary-unavailability message while the electricity panel remains usable.
 
 ### Local Router Setup (Monitoring Script)
 

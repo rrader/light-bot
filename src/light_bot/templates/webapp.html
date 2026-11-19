@@ -146,6 +146,19 @@
             gap: 16px;
         }
 
+        .radiator-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 24px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,.05); }
+        .radiator-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+        .radiator-title { font-size:18px; font-weight:700; }
+        .radiator-reading { font-size:26px; font-weight:750; }
+        .radiator-subtitle { color:var(--text-secondary); font-size:13px; margin-top:4px; }
+        .radiator-state { border-radius:999px; padding:7px 10px; font-size:12px; font-weight:700; background:var(--stat-bg); white-space:nowrap; }
+        .radiator-chart { width:100%; height:auto; display:block; margin-top:10px; overflow:visible; }
+        .radiator-message { color:var(--text-secondary); font-size:14px; line-height:1.45; padding:8px 0; }
+        .radiator-controls { display:flex; flex-wrap:wrap; align-items:end; gap:8px; margin-top:14px; }
+        .radiator-controls label { display:flex; flex-direction:column; gap:4px; color:var(--text-secondary); font-size:11px; flex:1 1 130px; }
+        .radiator-controls input, .radiator-controls button { border:1px solid var(--border-color); border-radius:10px; padding:9px; background:var(--stat-bg); color:var(--text-color); font:inherit; }
+        .radiator-controls button { font-weight:650; flex:0 0 auto; }
+
         .card-header {
             display: flex;
             align-items: flex-start;
@@ -671,6 +684,27 @@
                 </div>
             </div>
         </div>
+
+        <section class="radiator-card" id="radiatorCard" style="display:none" aria-label="Температура батареї">
+            <div class="radiator-head">
+                <div>
+                    <div class="radiator-title">🌡️ Батарея</div>
+                    <div class="radiator-reading" id="radiatorTemp">—</div>
+                    <div class="radiator-subtitle" id="radiatorTrend">Завантаження…</div>
+                </div>
+                <span class="radiator-state" id="radiatorHeating">—</span>
+            </div>
+            <div class="radiator-message" id="radiatorMessage" hidden></div>
+            <svg class="radiator-chart" id="radiatorChart" viewBox="0 0 1400 850" role="img" aria-label="Графік температури батареї, опалення, електрики та нестабільної напруги"></svg>
+            <div class="radiator-controls">
+                <label>Від <input id="radiatorStart" type="datetime-local"></label>
+                <label>До <input id="radiatorEnd" type="datetime-local"></label>
+                <button type="button" id="radiatorApply">Показати</button>
+                <button type="button" id="radiatorPrevious" aria-label="Попередній період">‹</button>
+                <button type="button" id="radiatorNext" aria-label="Наступний період">›</button>
+            </div>
+            <div class="radiator-subtitle" id="radiatorRangeLabel">Графік повторює дані каналу: батарея, опалення, електрика та виходи напруги за межі 207–253 В.</div>
+        </section>
     </div>
 
     <script>
@@ -718,6 +752,102 @@
         const startParam = tg?.initDataUnsafe?.start_param;
         let currentLocation = pathLoc || queryLoc || startParam || document.body.dataset.initialLocation || 'home';
         if (currentLocation === 'kyiv' || currentLocation === 'kiev') currentLocation = 'home';
+
+        const radiatorCard = document.getElementById('radiatorCard');
+        if (currentLocation === 'home') {
+            radiatorCard.style.display = '';
+            document.getElementById('radiatorApply').addEventListener('click', () => refreshRadiator(true));
+            document.getElementById('radiatorPrevious').addEventListener('click', () => shiftRadiatorPeriod(-1));
+            document.getElementById('radiatorNext').addEventListener('click', () => shiftRadiatorPeriod(1));
+            refreshRadiator(false);
+            setInterval(() => refreshRadiator(false), 60000);
+        }
+
+        let radiatorPeriod = null;
+        const radiatorEntities = ['temperature', 'heating', 'trend', 'voltage'];
+        function svgText(x, y, text, size=14, color='#344054', weight=400, anchor='start') {
+            const safe = String(text).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
+            return `<text x="${x}" y="${y}" font-size="${size}" fill="${color}" font-weight="${weight}" text-anchor="${anchor}">${safe}</text>`;
+        }
+        function drawRadiatorChart(history, events, startMs, endMs) {
+            const svg = document.getElementById('radiatorChart');
+            const W=1400,H=850,L=104,R=1360,T=116,B=630,GY=700,BH=24, x=t=>L+(t-startMs)/(endMs-startMs)*(R-L);
+            const series = key => history[key] || [];
+            const temps=series('temperature').filter(p=>Number.isFinite(Number(p.state)));
+            if (!temps.length) { svg.innerHTML=svgText(700,400,'Історії батареї за цей проміжок немає',24,'#667085',600,'middle'); return; }
+            const values=temps.map(p=>Number(p.state)); let lo=Math.floor((Math.min(...values)-2)/5)*5, hi=Math.ceil((Math.max(...values)+2)/5)*5; if(hi-lo<15)hi=lo+15;
+            const y=v=>B-(v-lo)/(hi-lo)*(B-T);
+            const out=['<defs><pattern id="coolingHatch" width="12" height="12" patternTransform="rotate(35)" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#22a06b" fill-opacity=".05"/><line x1="0" y1="0" x2="0" y2="12" stroke="#16834f" stroke-opacity=".48" stroke-width="1.5"/></pattern><pattern id="voltageHatch" width="9" height="9" patternTransform="rotate(35)" patternUnits="userSpaceOnUse"><rect width="9" height="9" fill="#fecaca" fill-opacity=".36"/><line x1="0" y1="0" x2="0" y2="9" stroke="#dc2626" stroke-opacity=".32" stroke-width="3"/></pattern><pattern id="unknownHatch" width="8" height="8" patternTransform="rotate(35)" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#eef0f4"/><line x1="0" y1="0" x2="0" y2="8" stroke="#98a2b3" stroke-opacity=".72" stroke-width="2"/></pattern></defs>', '<rect width="1400" height="850" rx="22" fill="#f9fafb"/>', svgText(L,48,'Температура батареї · Паркові Озера 2',24,'#172b4d',700), svgText(L,76,`${new Date(startMs).toLocaleString('uk-UA')} – ${new Date(endMs).toLocaleString('uk-UA')}`,15,'#667085')];
+            out.push('<line x1="680" y1="44" x2="712" y2="44" stroke="#e4572e" stroke-width="4"/>',svgText(720,49,'Батарея'),'<rect x="810" y="34" width="23" height="20" fill="url(#coolingHatch)" stroke="#16834f"/>',svgText(841,49,'Охолоджується'),'<rect x="990" y="34" width="25" height="20" fill="url(#voltageHatch)" stroke="#dc2626"/>',svgText(1023,49,'Напруга поза 207–253 В'),'<rect x="850" y="69" width="16" height="14" fill="#e8f4e8" stroke="#b7d7b8"/>',svgText(873,81,'Опалення гріє',13),'<rect x="1004" y="69" width="16" height="14" fill="#f1f4f8" stroke="#d0d5dd"/>',svgText(1027,81,'Не гріє',13),'<rect x="1110" y="69" width="16" height="14" fill="url(#unknownHatch)" stroke="#98a2b3"/>',svgText(1133,81,'Немає даних >30 хв',13));
+            out.push(`<rect x="${L}" y="${T}" width="${R-L}" height="${B-T}" rx="7" fill="#fff" stroke="#d0d5dd"/>`,svgText(L,101,'ТЕМПЕРАТУРА (°C)',12,'#667085',700));
+            const hp=series('heating').slice().sort((a,b)=>new Date(a.time)-new Date(b.time)).map(p=>[new Date(p.time).getTime(),['on','off'].includes(p.state)?p.state:'unknown']);
+            const htrans=[];for(const p of hp)if(!htrans.length||htrans.at(-1)[1]!==p[1])htrans.push(p);
+            if(!htrans.length||htrans[0][0]>startMs)htrans.unshift([startMs,'unknown']);
+            const hseg=[];let priorKnown=null;
+            for(let i=0;i<htrans.length;i++){const [at,state]=htrans[i],stop=htrans[i+1]?.[0]??endMs;if(state==='on'||state==='off'){if(stop>startMs&&at<endMs)hseg.push([Math.max(startMs,at),Math.min(endMs,stop),state]);priorKnown=state;continue;}const left=Math.max(startMs,at),right=Math.min(endMs,stop),grace=Math.min(right,at+30*60000);if(priorKnown&&grace>left)hseg.push([left,grace,priorKnown]);if(right>grace||!priorKnown)hseg.push([priorKnown?grace:left,right,'unknown']);}
+            for(const [a,b,s] of hseg){const col=s==='on'?'#e8f4e8':s==='off'?'#f1f4f8':'url(#unknownHatch)';out.push(`<rect x="${x(a)}" y="${T}" width="${Math.max(1,x(b)-x(a))}" height="${B-T}" fill="${col}"/>`);}
+            const trends=series('trend').slice().sort((a,b)=>new Date(a.time)-new Date(b.time)); let tr=trends.filter(p=>new Date(p.time)<=startMs).at(-1)?.state||trends[0]?.state||''; cursor=startMs;
+            const cooling=[]; for(const p of trends){const at=new Date(p.time).getTime();if(at<=startMs){tr=p.state;continue;}if(at>=endMs)break;if(tr==='Охолоджується')cooling.push([cursor,at]);cursor=at;tr=p.state;}if(tr==='Охолоджується')cooling.push([cursor,endMs]);
+            for(const [a,b] of cooling) for(const [ha,hb,s] of hseg) if(s==='on'){const aa=Math.max(a,ha),bb=Math.min(b,hb);if(bb>aa)out.push(`<rect x="${x(aa)}" y="${T}" width="${Math.max(1,x(bb)-x(aa))}" height="${B-T}" fill="url(#coolingHatch)"/>`);}
+            for(let v=Math.ceil(lo/5)*5;v<=hi;v+=5){const yy=y(v);out.push(`<line x1="${L}" y1="${yy}" x2="${R}" y2="${yy}" stroke="#e4e7ec"/>`,svgText(L-14,yy+5,String(v),13,'#667085',400,'end'));}
+            for(let t=startMs;t<endMs;t+=2*3600000){const xx=x(t);out.push(`<line x1="${xx}" y1="${T}" x2="${xx}" y2="${B}" stroke="#eef0f4"/>`,svgText(xx,670,new Date(t).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}),13,'#667085',400,'middle'));}
+            const eventsSorted=(events||[]).filter(e=>e.status&&e.timestamp).map(e=>({t:new Date(e.timestamp).getTime(),s:e.status})).filter(e=>e.t<=endMs).sort((a,b)=>a.t-b.t); let power=eventsSorted.filter(e=>e.t<=startMs).at(-1)?.s||'unknown';cursor=startMs;const pseg=[];for(const e of eventsSorted){if(e.t<=startMs)continue;if(e.t>=endMs)break;pseg.push([cursor,e.t,power]);cursor=e.t;power=e.s;}pseg.push([cursor,endMs,power]);
+            for(const [a,b,s] of pseg)out.push(`<rect x="${x(a)}" y="${GY}" width="${Math.max(1,x(b)-x(a))}" height="${BH}" fill="${s==='on'?'#f4c542':'#98a2b3'}"/>`);
+            const vp=series('voltage').slice().sort((a,b)=>new Date(a.time)-new Date(b.time)).map(p=>[new Date(p.time).getTime(),Number(p.state)]); let excursions=[];let ex=null;
+            for(let i=0;i<vp.length;i++){const [at,v]=vp[i],next=vp[i+1]?.[0]??endMs,stop=Math.min(next,at+180000,endMs),side=v<207?'low':v>253?'high':null;if(at>=endMs||!Number.isFinite(v)||!side||stop<=Math.max(at,startMs)){if(ex){excursions.push(ex);ex=null;}continue;}const aa=Math.max(at,startMs);if(ex&&ex.side===side&&Math.abs(ex.b-aa)<1){ex.b=stop;ex.ext=side==='low'?Math.min(ex.ext,v):Math.max(ex.ext,v);}else{if(ex)excursions.push(ex);ex={a:aa,b:stop,side,ext:v};}if(stop<next){excursions.push(ex);ex=null;}}
+            if(ex)excursions.push(ex);let labels=[];excursions=excursions.filter(e=>e.b>startMs&&e.a<endMs);for(const e of excursions){out.push(`<rect x="${x(e.a)}" y="${T}" width="${Math.max(2,x(e.b)-x(e.a))}" height="${B-T}" fill="url(#voltageHatch)"/><line x1="${x(e.a)}" y1="${T}" x2="${x(e.a)}" y2="${B}" stroke="#dc2626"/><line x1="${x(e.b)}" y1="${T}" x2="${x(e.b)}" y2="${B}" stroke="#dc2626"/>`);let row=0;while(labels.some(l=>Math.abs(l.x-x(e.a))<76&&l.row===row))row++;labels.push({x:x(e.a),row});out.push(`<rect x="${x(e.a)-40}" y="${T+4+row*21}" width="80" height="19" rx="4" fill="#fff" stroke="#fca5a5"/>`,svgText(x(e.a),T+18+row*21,`${e.side==='low'?'min':'max'} ${e.ext.toFixed(0)} V`,12,'#b42318',700,'middle'));}
+            const poly=temps.filter(p=>new Date(p.time)>=startMs&&new Date(p.time)<=endMs).map(p=>`${x(new Date(p.time))},${y(Number(p.state))}`).join(' ');if(poly)out.push(`<polyline points="${poly}" fill="none" stroke="#e4572e" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>`);
+            out.push(svgText(L-14,GY+17,'МЕРЕЖА',12,'#667085',700,'end'),`<rect x="${L}" y="${GY}" width="${R-L}" height="${BH}" rx="4" fill="none" stroke="#d0d5dd"/>`,'<circle cx="115" cy="748" r="5" fill="#f4c542"/>',svgText(128,753,'Світло є',12,'#667085'),'<circle cx="230" cy="748" r="5" fill="#98a2b3"/>',svgText(243,753,'Живлення відсутнє',12,'#667085'),svgText(L,790,'Напруга: вольтметр щитка перед реле; норма 207–253 В. Світло за історією Light Bot.',11,'#98a2b3'));
+            svg.innerHTML=out.join('');
+        }
+
+        function toDateTimeLocal(value) {
+            const date=new Date(value), offset=date.getTimezoneOffset()*60000;
+            return new Date(date.getTime()-offset).toISOString().slice(0,16);
+        }
+        function shiftRadiatorPeriod(direction) {
+            const startEl=document.getElementById('radiatorStart'), endEl=document.getElementById('radiatorEnd');
+            if(!startEl.value||!endEl.value)return;
+            const span=new Date(endEl.value)-new Date(startEl.value), shift=span*direction;
+            startEl.value=toDateTimeLocal(new Date(new Date(startEl.value).getTime()+shift));
+            endEl.value=toDateTimeLocal(new Date(new Date(endEl.value).getTime()+shift));
+            refreshRadiator(true);
+        }
+
+        async function refreshRadiator(custom=false) {
+            if (currentLocation !== 'home') return;
+            const message = document.getElementById('radiatorMessage');
+            try {
+                let query='';
+                if(custom){const a=new Date(document.getElementById('radiatorStart').value).getTime(),b=new Date(document.getElementById('radiatorEnd').value).getTime();if(!Number.isFinite(a)||!Number.isFinite(b)||b<=a||b-a>48*3600000)throw new Error('range');query=`?start=${a/1000}&end=${b/1000}&hours=${Math.max(6,Math.ceil((b-a)/3600000))}`;}
+                const response = await fetch(`/api/nursery-radiator${query}`, { cache: 'no-store' });
+                const data = await response.json();
+                if (!response.ok || !data.available) throw new Error(data.message || 'unavailable');
+                const s = data.states;
+                const temp = Number(s.temperature.state);
+                document.getElementById('radiatorTemp').textContent = Number.isFinite(temp) ? `${temp.toFixed(1)} °C` : '—';
+                document.getElementById('radiatorHeating').textContent = s.heating.state === 'on' ? 'ГРІЄ' : s.heating.state === 'off' ? 'НЕ ГРІЄ' : 'СТАН НЕВІДОМИЙ';
+                document.getElementById('radiatorTrend').textContent = s.trend.state || 'Тренд невідомий';
+                message.hidden = true;
+                document.getElementById('radiatorChart').hidden = false;
+                const startMs=new Date(data.range.start).getTime(),endMs=new Date(data.range.end).getTime();
+                radiatorPeriod={start:startMs,end:endMs};
+                document.getElementById('radiatorStart').value=toDateTimeLocal(startMs);
+                document.getElementById('radiatorEnd').value=toDateTimeLocal(endMs);
+                document.getElementById('radiatorRangeLabel').textContent=`Проміжок: ${new Date(startMs).toLocaleString('uk-UA')} – ${new Date(endMs).toLocaleString('uk-UA')}`;
+                let events=[];try{const er=await fetch(`/api/events?limit=1000&location=home`,{cache:'no-store'});if(er.ok)events=await er.json();}catch(_){}
+                drawRadiatorChart(data.history || {}, events, startMs, endMs);
+            } catch (error) {
+                document.getElementById('radiatorTemp').textContent = '—';
+                document.getElementById('radiatorHeating').textContent = 'НЕДОСТУПНО';
+                document.getElementById('radiatorTrend').textContent = '';
+                message.textContent = error?.message === 'Оберіть проміжок не довший за 48 годин.'
+                    ? error.message
+                    : 'Home Assistant або історія за цей проміжок зараз недоступні. Спробуйте оновити сторінку трохи пізніше.';
+                message.hidden = false;
+                document.getElementById('radiatorChart').hidden = true;
+            }
+        }
 
         // Helper to format minutes into HH:MM
         function minsToTimeStr(mins) {

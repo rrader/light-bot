@@ -26,6 +26,7 @@ from light_bot.services.unstable_alert_manager import UnstableAlertManager
 from light_bot.services.outage_alert_manager import OutageAlertManager
 from light_bot.core.stats_blueprint import create_stats_blueprint
 from light_bot.core.api_blueprint import create_api_blueprint, LLMS_TXT, OPENAPI_SPEC, SWAGGER_HTML
+from light_bot.core.nursery_radiator_blueprint import create_nursery_radiator_blueprint
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ outage_alert_manager = OutageAlertManager(
     delay_seconds=OUTAGE_NOTIFICATION_DELAY_SECONDS
 )
 app.register_blueprint(create_stats_blueprint(stats_service))
+app.register_blueprint(create_nursery_radiator_blueprint(), url_prefix='/api')
 
 
 @app.route('/llms.txt', methods=['GET'])
