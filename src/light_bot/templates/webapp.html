@@ -806,9 +806,11 @@
         function shiftRadiatorPeriod(direction) {
             const startEl=document.getElementById('radiatorStart'), endEl=document.getElementById('radiatorEnd');
             if(!startEl.value||!endEl.value)return;
-            const span=new Date(endEl.value)-new Date(startEl.value), shift=span*direction;
-            startEl.value=toDateTimeLocal(new Date(new Date(startEl.value).getTime()+shift));
-            endEl.value=toDateTimeLocal(new Date(new Date(endEl.value).getTime()+shift));
+            const span=new Date(endEl.value)-new Date(startEl.value);
+            let nextEnd=new Date(endEl.value).getTime()+span*direction;
+            if(nextEnd>Date.now())nextEnd=Date.now();
+            startEl.value=toDateTimeLocal(nextEnd-span);
+            endEl.value=toDateTimeLocal(nextEnd);
             refreshRadiator(true);
         }
 
