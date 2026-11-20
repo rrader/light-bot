@@ -784,19 +784,24 @@
             if (window.location.pathname !== '/radiator') history.replaceState({}, '', '/radiator');
         }
 
+        let radiatorPeriod = null;
+        let radiatorCustomRange = false;
+        let radiatorRefreshSequence = 0;
         const radiatorCard = document.getElementById('radiatorCard');
         if (radiatorMode) {
             radiatorCard.style.display = '';
-            document.getElementById('radiatorApply').addEventListener('click', () => refreshRadiator(true));
+            document.getElementById('radiatorApply').addEventListener('click', () => {
+                radiatorCustomRange = true;
+                refreshRadiator(true);
+            });
             document.getElementById('radiatorPrevious').addEventListener('click', () => shiftRadiatorPeriod(-1));
             document.getElementById('radiatorNext').addEventListener('click', () => shiftRadiatorPeriod(1));
             refreshRadiator(false);
-            setInterval(() => refreshRadiator(false), 60000);
+            setInterval(() => refreshRadiator(radiatorCustomRange), 60000);
         } else {
             radiatorCard.remove();
         }
 
-        let radiatorPeriod = null;
         const radiatorEntities = ['temperature', 'heating', 'trend', 'voltage'];
         function svgText(x, y, text, size=14, color='#344054', weight=400, anchor='start') {
             const safe = String(text).replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
@@ -884,17 +889,20 @@
             if(nextEnd>Date.now())nextEnd=Date.now();
             startEl.value=toDateTimeLocal(nextEnd-span);
             endEl.value=toDateTimeLocal(nextEnd);
+            radiatorCustomRange=true;
             refreshRadiator(true);
         }
 
         async function refreshRadiator(custom=false) {
             if (!radiatorMode) return;
+            const refreshSequence = ++radiatorRefreshSequence;
             const message = document.getElementById('radiatorMessage');
             try {
                 let query='';
                 if(custom){const a=new Date(document.getElementById('radiatorStart').value).getTime(),b=new Date(document.getElementById('radiatorEnd').value).getTime();if(!Number.isFinite(a)||!Number.isFinite(b)||b<=a||b-a>48*3600000)throw new Error('range');query=`?start=${a/1000}&end=${b/1000}&hours=${Math.max(6,Math.ceil((b-a)/3600000))}`;}
                 const response = await fetch(`/api/nursery-radiator${query}`, { cache: 'no-store' });
                 const data = await response.json();
+                if (refreshSequence !== radiatorRefreshSequence) return;
                 if (!response.ok || !data.available) throw new Error(data.message || 'unavailable');
                 const s = data.states;
                 const temp = Number(s.temperature.state);
@@ -909,8 +917,10 @@
                 document.getElementById('radiatorEnd').value=toDateTimeLocal(endMs);
                 document.getElementById('radiatorRangeLabel').textContent=`Проміжок: ${new Date(startMs).toLocaleString('uk-UA')} – ${new Date(endMs).toLocaleString('uk-UA')}`;
                 let events=[];try{const er=await fetch(`/api/events?limit=1000&location=home`,{cache:'no-store'});if(er.ok)events=await er.json();}catch(_){}
+                if (refreshSequence !== radiatorRefreshSequence) return;
                 drawRadiatorChart(data.history || {}, events, data.voltage_excursions || [], startMs, endMs);
             } catch (error) {
+                if (refreshSequence !== radiatorRefreshSequence) return;
                 document.getElementById('radiatorTemp').textContent = '—';
                 document.getElementById('radiatorHeating').textContent = 'НЕДОСТУПНО';
                 document.getElementById('radiatorTrend').textContent = '';
