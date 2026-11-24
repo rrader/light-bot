@@ -38,15 +38,22 @@ def _voltage_excursions(points, start, end):
                 parsed.append((stamp, value))
         except (TypeError, ValueError, KeyError):
             continue
+    # Bridge brief returns to the normal band so noisy meter samples do not
+    # split one mains event into a stack of nearly identical labels.
+    merge_gap = 180
     for index, (stamp, value) in enumerate(parsed):
         next_stamp = parsed[index + 1][0] if index + 1 < len(parsed) else end
         stop = min(next_stamp, stamp + 180, end)
         left = max(stamp, start)
-        side = "low" if value < 207 else "high" if value > 253 else None
+        side = "low" if 0 < value < 207 else "high" if value > 253 else None
         if not side or stop <= left:
-            flush()
+            # Zero means power is absent, so it closes an excursion without
+            # being shown as an undervoltage marker. Bridge only ordinary
+            # positive in-range readings for the same side.
+            if value <= 0 or not (current and left - current["end"] <= merge_gap):
+                flush()
             continue
-        if current and current["side"] == side and abs(current["end"] - left) < 1:
+        if current and current["side"] == side and left - current["end"] <= merge_gap:
             current["end"] = stop
             current["extreme"] = min(current["extreme"], value) if side == "low" else max(current["extreme"], value)
         else:
