@@ -23,12 +23,7 @@ _cache = {"until": 0.0, "value": None}
 
 def _voltage_excursions(points, start, end):
     """Project meter history down to only out-of-range intervals and extrema."""
-    result, current = [], None
-    def flush():
-        nonlocal current
-        if current and current["end"] > current["start"]:
-            result.append(current)
-        current = None
+    result = []
     parsed = []
     for point in points:
         try:
@@ -38,30 +33,33 @@ def _voltage_excursions(points, start, end):
                 parsed.append((stamp, value))
         except (TypeError, ValueError, KeyError):
             continue
-    # Bridge brief returns to the normal band so noisy meter samples do not
-    # split one mains event into a stack of nearly identical labels.
-    merge_gap = 180
+    # Brief normal readings between voltage spikes are meter noise, not a new
+    # event. Group same-side excursions across gaps up to five minutes.
+    merge_gap = 300
+    current = None
     for index, (stamp, value) in enumerate(parsed):
         next_stamp = parsed[index + 1][0] if index + 1 < len(parsed) else end
         stop = min(next_stamp, stamp + 180, end)
         left = max(stamp, start)
         side = "low" if 0 < value < 207 else "high" if value > 253 else None
-        if not side or stop <= left:
-            # Zero means power is absent, so it closes an excursion without
-            # being shown as an undervoltage marker. Bridge only ordinary
-            # positive in-range readings for the same side.
-            if value <= 0 or not (current and left - current["end"] <= merge_gap):
-                flush()
+        if stop <= left:
+            continue
+        if not side:
+            # Zero means power is absent, so it is never drawn as an excursion
+            # and cannot be used to bridge two separate voltage events.
+            if value <= 0 and current:
+                result.append(current)
+                current = None
             continue
         if current and current["side"] == side and left - current["end"] <= merge_gap:
             current["end"] = stop
             current["extreme"] = min(current["extreme"], value) if side == "low" else max(current["extreme"], value)
         else:
-            flush()
+            if current:
+                result.append(current)
             current = {"start": max(left, start), "end": stop, "side": side, "extreme": value}
-        if stop < next_stamp:
-            flush()
-    flush()
+    if current:
+        result.append(current)
     return [
         {"start": datetime.fromtimestamp(x["start"], timezone.utc).isoformat(),
          "end": datetime.fromtimestamp(x["end"], timezone.utc).isoformat(),
